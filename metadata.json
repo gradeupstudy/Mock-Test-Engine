@@ -1,0 +1,6 @@
+{
+  "name": "Gradeup Study",
+  "description": "Professional MCQ Bank & Mock Test Generator with Gemini AI Classification",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
