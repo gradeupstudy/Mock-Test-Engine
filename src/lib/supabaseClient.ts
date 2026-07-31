@@ -3,10 +3,26 @@ import { Question, MockHistory } from '../types';
 
 const STORAGE_KEY_URL = 'gradeup_supabase_url';
 const STORAGE_KEY_ANON = 'gradeup_supabase_anon_key';
+const STORAGE_KEY_BUCKET = 'gradeup_supabase_bucket_name';
+const DEFAULT_BUCKET_NAME = 'backups';
 
 export interface SupabaseConfig {
   url: string;
   anonKey: string;
+  bucketName: string;
+}
+
+export function getStoredSupabaseBucketName(): string {
+  const localBucket = localStorage.getItem(STORAGE_KEY_BUCKET);
+  return (localBucket || DEFAULT_BUCKET_NAME).trim();
+}
+
+export function saveSupabaseBucketName(name: string): void {
+  if (name.trim()) {
+    localStorage.setItem(STORAGE_KEY_BUCKET, name.trim());
+  } else {
+    localStorage.removeItem(STORAGE_KEY_BUCKET);
+  }
 }
 
 export function getStoredSupabaseConfig(): SupabaseConfig {
@@ -19,7 +35,8 @@ export function getStoredSupabaseConfig(): SupabaseConfig {
 
   return {
     url: localUrl || envUrl,
-    anonKey: localKey || envKey
+    anonKey: localKey || envKey,
+    bucketName: getStoredSupabaseBucketName()
   };
 }
 
@@ -604,7 +621,184 @@ export async function fetchMockHistoryFromSupabase(): Promise<{ success: boolean
   }
 }
 
-export const SUPABASE_SQL_SCHEMA = `-- Gradeup Study Supabase Database Schema
+/* ==========================================================================
+   SUPABASE FILE BUCKET STORAGE BACKUP & RESTORE FUNCTIONS
+   ========================================================================== */
+
+export interface SupabaseStorageBackupFile {
+  name: string;
+  id?: string;
+  created_at?: string;
+  updated_at?: string;
+  size?: number;
+}
+
+export async function testSupabaseBucketAccess(
+  customBucketName?: string
+): Promise<{ success: boolean; message: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, message: 'Supabase URL or Anon Key is missing.' };
+  }
+
+  const bucket = customBucketName || getStoredSupabaseBucketName();
+
+  try {
+    const { data, error } = await client.storage.from(bucket).list('', { limit: 10 });
+    if (error) {
+      return {
+        success: false,
+        message: `Bucket error ("${bucket}"): ${error.message}. Make sure the bucket "${bucket}" exists in Supabase Storage.`
+      };
+    }
+
+    return {
+      success: true,
+      message: `Successfully connected to Supabase Storage Bucket "${bucket}"! (${data?.length || 0} files found)`
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Failed to access Supabase Storage Bucket "${bucket}": ${err.message || 'Unknown error'}`
+    };
+  }
+}
+
+export async function uploadJsonBackupToSupabaseBucket(
+  backupData: any,
+  fileName?: string,
+  customBucketName?: string
+): Promise<{ success: boolean; path?: string; fileName?: string; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase is not configured. Please enter project URL & Anon Key.' };
+  }
+
+  const bucket = customBucketName || getStoredSupabaseBucketName();
+  const targetFileName = (fileName && fileName.trim())
+    ? fileName.trim()
+    : `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+
+  try {
+    const jsonString = typeof backupData === 'string' ? backupData : JSON.stringify(backupData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+
+    const { data, error } = await client.storage
+      .from(bucket)
+      .upload(targetFileName, blob, {
+        contentType: 'application/json',
+        upsert: true
+      });
+
+    if (error) {
+      if (error.message.includes('not found') || error.message.includes('Bucket')) {
+        return {
+          success: false,
+          error: `Bucket "${bucket}" was not found in Supabase Storage. Please create the bucket in your Supabase Dashboard or run the Storage SQL.`
+        };
+      }
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, path: data?.path || targetFileName, fileName: targetFileName };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to upload JSON file to Supabase Storage' };
+  }
+}
+
+export async function listJsonBackupsFromSupabaseBucket(
+  customBucketName?: string
+): Promise<{ success: boolean; files: SupabaseStorageBackupFile[]; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, files: [], error: 'Supabase client is not configured.' };
+  }
+
+  const bucket = customBucketName || getStoredSupabaseBucketName();
+
+  try {
+    const { data, error } = await client.storage.from(bucket).list('', {
+      limit: 100,
+      sortBy: { column: 'created_at', order: 'desc' }
+    });
+
+    if (error) {
+      return { success: false, files: [], error: error.message };
+    }
+
+    // Filter only json files or all items that are files
+    const jsonFiles: SupabaseStorageBackupFile[] = (data || [])
+      .filter(item => item.name && (item.name.endsWith('.json') || !item.id))
+      .map(item => ({
+        name: item.name,
+        id: item.id || item.name,
+        created_at: item.created_at || (item.metadata?.created_at as string) || new Date().toISOString(),
+        updated_at: item.updated_at || (item.metadata?.updated_at as string) || new Date().toISOString(),
+        size: item.metadata?.size || 0
+      }));
+
+    return { success: true, files: jsonFiles };
+  } catch (err: any) {
+    return { success: false, files: [], error: err.message || 'Failed to list backup files' };
+  }
+}
+
+export async function downloadJsonBackupFromSupabaseBucket(
+  fileName: string,
+  customBucketName?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
+
+  const bucket = customBucketName || getStoredSupabaseBucketName();
+
+  try {
+    const { data, error } = await client.storage.from(bucket).download(fileName);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (!data) {
+      return { success: false, error: 'Downloaded empty file from Supabase Storage.' };
+    }
+
+    const text = await data.text();
+    const parsed = JSON.parse(text);
+
+    return { success: true, data: parsed };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to download backup JSON file from Supabase Storage' };
+  }
+}
+
+export async function deleteJsonBackupFromSupabaseBucket(
+  fileName: string,
+  customBucketName?: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
+
+  const bucket = customBucketName || getStoredSupabaseBucketName();
+
+  try {
+    const { error } = await client.storage.from(bucket).remove([fileName]);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to delete file from Supabase Storage' };
+  }
+}
+
+export const SUPABASE_SQL_SCHEMA = `-- Gradeup Study Supabase Database & Storage Schema
 
 -- 1. Questions Table
 CREATE TABLE IF NOT EXISTS public.questions (
@@ -638,7 +832,12 @@ CREATE TABLE IF NOT EXISTS public.mock_history (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS) or add public permissions
+-- 3. Storage Bucket 'backups' for JSON File Storage
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('backups', 'backups', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Enable Row Level Security (RLS) & Public Policies for Tables
 ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mock_history ENABLE ROW LEVEL SECURITY;
 
@@ -647,4 +846,10 @@ CREATE POLICY "Allow public insert/update on questions" ON public.questions FOR 
 
 CREATE POLICY "Allow public read access on mock_history" ON public.mock_history FOR SELECT USING (true);
 CREATE POLICY "Allow public insert/update on mock_history" ON public.mock_history FOR ALL USING (true);
+
+-- Storage Object Security Policies for 'backups' bucket
+CREATE POLICY "Public Read Access on backups bucket" ON storage.objects FOR SELECT USING (bucket_id = 'backups');
+CREATE POLICY "Public Upload Access on backups bucket" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'backups');
+CREATE POLICY "Public Update Access on backups bucket" ON storage.objects FOR UPDATE USING (bucket_id = 'backups');
+CREATE POLICY "Public Delete Access on backups bucket" ON storage.objects FOR DELETE USING (bucket_id = 'backups');
 `;

@@ -10,11 +10,12 @@ import {
   AlertTriangle,
   Cloud,
   FileCheck,
-  CloudCheck
+  FolderSync,
+  Database
 } from 'lucide-react';
-import { GoogleDriveModal } from './GoogleDriveModal';
+import { SupabaseStorageModal } from './SupabaseStorageModal';
 import { PinModal } from './PinModal';
-import { getStoredDriveToken } from '../lib/googleDriveClient';
+import { getStoredSupabaseConfig } from '../lib/supabaseClient';
 
 interface BackupViewProps {
   questions: Question[];
@@ -31,10 +32,11 @@ export const BackupView: React.FC<BackupViewProps> = ({
 }) => {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
-  const [isDriveModalOpen, setIsDriveModalOpen] = useState<boolean>(false);
+  const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
 
-  const isDriveConnected = Boolean(getStoredDriveToken());
+  const supabaseConfig = getStoredSupabaseConfig();
+  const isSupabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
 
   const handleExportJson = () => {
     const backupData = {
@@ -177,37 +179,37 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Google Drive Cloud Backup Card */}
+        {/* Supabase Storage Cloud Backup Card */}
         <div className="bg-[#111740] border border-[#232f7a] p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
-                <HardDrive className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <FolderSync className="w-5 h-5" />
               </div>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                isDriveConnected
+                isSupabaseConfigured
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                   : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
               }`}>
-                {isDriveConnected ? 'Drive Linked' : 'Not Linked'}
+                {isSupabaseConfigured ? 'Bucket Connected' : 'Not Linked'}
               </span>
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <span>Google Drive Cloud Sync</span>
+                <span>Supabase File Bucket Storage</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Link your personal Google Drive account to store and restore backup JSON files seamlessly in 1-click.
+                Store and restore full JSON backup files in Supabase Storage Buckets (e.g. "backups") with 1-click restore.
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => setIsDriveModalOpen(true)}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
+            onClick={() => setIsStorageModalOpen(true)}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
           >
-            <Cloud className="w-4 h-4" />
-            <span>{isDriveConnected ? 'Manage Google Drive Sync' : 'Link Google Drive'}</span>
+            <Database className="w-4 h-4" />
+            <span>{isSupabaseConfigured ? 'Manage Supabase Bucket Storage' : 'Link Supabase Bucket'}</span>
           </button>
         </div>
 
@@ -317,9 +319,9 @@ export const BackupView: React.FC<BackupViewProps> = ({
         </div>
       )}
 
-      <GoogleDriveModal
-        isOpen={isDriveModalOpen}
-        onClose={() => setIsDriveModalOpen(false)}
+      <SupabaseStorageModal
+        isOpen={isStorageModalOpen}
+        onClose={() => setIsStorageModalOpen(false)}
         questions={questions}
         mockHistory={mockHistory}
         onDataRestored={onDataRestored}
