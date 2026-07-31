@@ -14,7 +14,9 @@ import {
   Code,
   Copy,
   Check,
-  Server
+  Server,
+  Zap,
+  Archive
 } from 'lucide-react';
 import {
   getStoredSupabaseConfig,
@@ -50,6 +52,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
   const [bucketName, setBucketName] = useState('backups');
+  const [useGzip, setUseGzip] = useState(true);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const [isTesting, setIsTesting] = useState(false);
@@ -70,7 +73,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
       setAnonKey(config.anonKey);
       setBucketName(config.bucketName || 'backups');
       setStatusMsg(null);
-      setCustomFilename(`Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+      setCustomFilename(`Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`);
 
       if (config.url && config.anonKey) {
         loadBucketFiles(config.bucketName || 'backups');
@@ -116,6 +119,13 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
     }
   };
 
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return '0 B';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  };
+
   const handleUploadBackup = async () => {
     if (!url || !anonKey) {
       setStatusMsg({ text: 'Please configure Supabase URL and Anon Key first.', type: 'error' });
@@ -124,7 +134,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
     }
 
     setIsSaving(true);
-    setStatusMsg({ text: `Uploading backup JSON to Supabase Storage Bucket "${bucketName}"...`, type: 'info' });
+    setStatusMsg({ text: `Compressing (Gzip) & Uploading backup to Supabase Storage Bucket "${bucketName}"...`, type: 'info' });
 
     const backupPayload = {
       version: '2.5',
@@ -135,13 +145,19 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
       mockHistory
     };
 
-    const fileName = customFilename.trim() || `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
-    const res = await uploadJsonBackupToSupabaseBucket(backupPayload, fileName, bucketName);
+    const fileName = customFilename.trim() || `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`;
+    const res = await uploadJsonBackupToSupabaseBucket(backupPayload, fileName, bucketName, useGzip);
     setIsSaving(false);
 
     if (res.success) {
+      const origMB = res.originalSize ? formatFileSize(res.originalSize) : '';
+      const compMB = res.compressedSize ? formatFileSize(res.compressedSize) : '';
+      const savingsInfo = useGzip && res.savingsPercent
+        ? ` (Size reduced from ${origMB} ➔ ${compMB}, ${res.savingsPercent}% smaller!)`
+        : '';
+
       setStatusMsg({
-        text: `⚡ Backup JSON successfully saved to Supabase Bucket "${bucketName}" as "${res.fileName}"! (${questions.length} MCQs & ${mockHistory.length} Mock Tests)`,
+        text: `⚡ Backup successfully saved to Supabase Bucket "${bucketName}" as "${res.fileName}"!${savingsInfo} (${questions.length} MCQs & ${mockHistory.length} Mock Tests)`,
         type: 'success'
       });
       await loadBucketFiles(bucketName);
@@ -152,7 +168,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
 
   const handleRestoreFile = async (file: SupabaseStorageBackupFile) => {
     setIsRestoringName(file.name);
-    setStatusMsg({ text: `Downloading backup file "${file.name}" from Supabase Storage...`, type: 'info' });
+    setStatusMsg({ text: `Downloading & decompressing "${file.name}" from Supabase Storage...`, type: 'info' });
 
     const res = await downloadJsonBackupFromSupabaseBucket(file.name, bucketName);
     setIsRestoringName(null);
@@ -175,14 +191,14 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
       if (restoredQs.length > 0) await addQuestionsBatch(restoredQs);
       if (restoredMocks.length > 0) await addMocksBatch(restoredMocks);
       setStatusMsg({
-        text: `Successfully appended ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage to IndexedDB!`,
+        text: `Successfully decompressed and appended ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage to IndexedDB!`,
         type: 'success'
       });
     } else {
       if (restoredQs.length > 0) await replaceAllQuestions(restoredQs);
       if (restoredMocks.length > 0) await replaceAllMocks(restoredMocks);
       setStatusMsg({
-        text: `Successfully replaced local database with ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage!`,
+        text: `Successfully decompressed and replaced local database with ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage!`,
         type: 'success'
       });
     }
@@ -224,12 +240,13 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center space-x-2">
-                <span>Supabase File Bucket Storage Backup</span>
-                <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                  Bucket Sync
+                <span>Supabase File Bucket Storage</span>
+                <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span>Gzip Compressed</span>
                 </span>
               </h2>
-              <p className="text-xs text-slate-400">Store and restore backup JSON files in Supabase Cloud Bucket Storage</p>
+              <p className="text-xs text-slate-400">Store and restore compressed JSON backup files (.json.gz / .json) in Supabase Cloud Bucket</p>
             </div>
           </div>
           <button
@@ -333,6 +350,33 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                       </span>
                     </div>
 
+                    {/* Compression Toggle Bar */}
+                    <div className="bg-[#080b26] border border-[#232f7a] p-3 rounded-xl flex items-center justify-between text-xs">
+                      <div className="flex items-center space-x-2.5">
+                        <Archive className="w-4 h-4 text-amber-400" />
+                        <div>
+                          <span className="font-bold text-white">Gzip Compression (Pako)</span>
+                          <p className="text-[11px] text-slate-400">Reduces file size by ~85-90% (e.g. 300MB JSON becomes ~30MB)</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useGzip}
+                          onChange={(e) => {
+                            setUseGzip(e.target.checked);
+                            setCustomFilename(prev => {
+                              if (e.target.checked && !prev.endsWith('.gz')) return `${prev}.gz`;
+                              if (!e.target.checked && prev.endsWith('.gz')) return prev.replace(/\.gz$/, '');
+                              return prev;
+                            });
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                      </label>
+                    </div>
+
                     <div className="space-y-2">
                       <label className="block text-xs font-semibold text-slate-300">
                         Backup File Name
@@ -342,7 +386,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                           type="text"
                           value={customFilename}
                           onChange={(e) => setCustomFilename(e.target.value)}
-                          placeholder="Gradeup_Study_Backup.json"
+                          placeholder="Gradeup_Study_Backup.json.gz"
                           className="flex-1 bg-[#070a24] border border-[#232f7a] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
                         />
                         <button
@@ -355,7 +399,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                           ) : (
                             <UploadCloud className="w-4 h-4" />
                           )}
-                          <span>{isSaving ? 'Uploading File...' : 'Backup JSON Now'}</span>
+                          <span>{isSaving ? 'Compressing & Uploading...' : 'Backup JSON Now'}</span>
                         </button>
                       </div>
                     </div>
@@ -381,12 +425,12 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                     {isLoadingFiles ? (
                       <div className="p-8 text-center text-xs text-slate-400 space-y-2 bg-[#0b0e2b] rounded-xl border border-[#232f7a]">
                         <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin mx-auto" />
-                        <p>Fetching JSON backup files from Supabase Storage Bucket...</p>
+                        <p>Fetching backup files from Supabase Storage Bucket...</p>
                       </div>
                     ) : bucketFiles.length === 0 ? (
                       <div className="p-8 text-center text-xs text-slate-400 bg-[#0b0e2b] rounded-xl border border-[#232f7a] space-y-2">
                         <FileJson className="w-8 h-8 text-slate-600 mx-auto" />
-                        <p>No JSON backup files found in Supabase Storage Bucket "{bucketName}" yet.</p>
+                        <p>No backup files found in Supabase Storage Bucket "{bucketName}" yet.</p>
                         <p className="text-[11px] text-slate-500">Click "Backup JSON Now" above to save your first backup file.</p>
                       </div>
                     ) : (
@@ -395,6 +439,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                           const isRestoring = isRestoringName === file.name;
                           const isDeleting = isDeletingName === file.name;
                           const formattedDate = new Date(file.updated_at || file.created_at || '').toLocaleString();
+                          const isCompressedFile = file.name.endsWith('.gz') || file.name.endsWith('.zip');
 
                           return (
                             <div
@@ -403,8 +448,17 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                             >
                               <div className="space-y-0.5">
                                 <div className="flex items-center space-x-2">
-                                  <FileJson className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                                  {isCompressedFile ? (
+                                    <Archive className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                                  ) : (
+                                    <FileJson className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                                  )}
                                   <span className="text-xs font-bold text-white font-mono">{file.name}</span>
+                                  {isCompressedFile && (
+                                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-sans">
+                                      Gzip
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex items-center space-x-3 text-[11px] text-slate-400">
                                   <span className="flex items-center space-x-1">
@@ -412,7 +466,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                                     <span>Uploaded: {formattedDate}</span>
                                   </span>
                                   {file.size ? (
-                                    <span>{(file.size / 1024).toFixed(1)} KB</span>
+                                    <span>Size: {formatFileSize(file.size)}</span>
                                   ) : null}
                                 </div>
                               </div>
@@ -422,14 +476,14 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
                                   onClick={() => handleRestoreFile(file)}
                                   disabled={isRestoring || isDeleting}
                                   className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors flex items-center space-x-1.5 shadow-sm"
-                                  title="Restore this backup into local IndexedDB"
+                                  title="Decompress and restore into local IndexedDB"
                                 >
                                   {isRestoring ? (
                                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                                   ) : (
                                     <DownloadCloud className="w-3.5 h-3.5" />
                                   )}
-                                  <span>{isRestoring ? 'Restoring...' : 'Restore'}</span>
+                                  <span>{isRestoring ? 'Decompressing...' : 'Restore'}</span>
                                 </button>
 
                                 <button
@@ -559,3 +613,4 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
     </div>
   );
 };
+

@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { gzip, ungzip } from 'pako';
 import { Question, MockHistory } from '../types';
 
 const STORAGE_KEY_URL = 'gradeup_supabase_url';
@@ -621,8 +622,10 @@ export async function fetchMockHistoryFromSupabase(): Promise<{ success: boolean
   }
 }
 
+import pako from 'pako';
+
 /* ==========================================================================
-   SUPABASE FILE BUCKET STORAGE BACKUP & RESTORE FUNCTIONS
+   SUPABASE FILE BUCKET STORAGE BACKUP & RESTORE FUNCTIONS WITH GZIP
    ========================================================================== */
 
 export interface SupabaseStorageBackupFile {
@@ -631,6 +634,55 @@ export interface SupabaseStorageBackupFile {
   created_at?: string;
   updated_at?: string;
   size?: number;
+  isCompressed?: boolean;
+}
+
+/**
+ * Compress JSON or object to Gzip Uint8Array/Blob
+ */
+export function compressJsonToGzip(data: any): {
+  compressedData: Uint8Array;
+  originalSize: number;
+  compressedSize: number;
+  savingsPercent: string;
+} {
+  const jsonString = typeof data === 'string' ? data : JSON.stringify(data);
+  const textEncoder = new TextEncoder();
+  const rawBytes = textEncoder.encode(jsonString);
+  const originalSize = rawBytes.length;
+
+  const compressedData = gzip(rawBytes, { level: 9 }); // Maximum compression
+  const compressedSize = compressedData.length;
+  const savings = originalSize > 0 ? (((originalSize - compressedSize) / originalSize) * 100).toFixed(1) : '0';
+
+  return {
+    compressedData,
+    originalSize,
+    compressedSize,
+    savingsPercent: savings
+  };
+}
+
+/**
+ * Decompress Gzip Uint8Array or ArrayBuffer to JSON object or raw data.
+ * Automatically detects whether data is Gzip compressed or plain JSON text.
+ */
+export function decompressGzipToJson(inputData: ArrayBuffer | Uint8Array): any {
+  const uint8 = inputData instanceof Uint8Array ? inputData : new Uint8Array(inputData);
+
+  // Check magic bytes for Gzip header: 0x1F, 0x8B
+  const isGzip = uint8.length >= 2 && uint8[0] === 0x1f && uint8[1] === 0x8b;
+
+  if (isGzip) {
+    const decompressedBytes = ungzip(uint8);
+    const jsonStr = new TextDecoder('utf-8').decode(decompressedBytes);
+    return JSON.parse(jsonStr);
+  } else {
+    // Plain uncompressed text
+    const textDecoder = new TextDecoder('utf-8');
+    const jsonStr = textDecoder.decode(uint8);
+    return JSON.parse(jsonStr);
+  }
 }
 
 export async function testSupabaseBucketAccess(
@@ -667,26 +719,56 @@ export async function testSupabaseBucketAccess(
 export async function uploadJsonBackupToSupabaseBucket(
   backupData: any,
   fileName?: string,
-  customBucketName?: string
-): Promise<{ success: boolean; path?: string; fileName?: string; error?: string }> {
+  customBucketName?: string,
+  useGzipCompression: boolean = true
+): Promise<{
+  success: boolean;
+  path?: string;
+  fileName?: string;
+  originalSize?: number;
+  compressedSize?: number;
+  savingsPercent?: string;
+  error?: string;
+}> {
   const client = getSupabaseClient();
   if (!client) {
     return { success: false, error: 'Supabase is not configured. Please enter project URL & Anon Key.' };
   }
 
   const bucket = customBucketName || getStoredSupabaseBucketName();
-  const targetFileName = (fileName && fileName.trim())
+  let targetFileName = (fileName && fileName.trim())
     ? fileName.trim()
     : `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
 
   try {
-    const jsonString = typeof backupData === 'string' ? backupData : JSON.stringify(backupData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
+    let uploadBlob: Blob;
+    let originalSize = 0;
+    let compressedSize = 0;
+    let savingsPercent = '0';
+
+    if (useGzipCompression) {
+      if (!targetFileName.endsWith('.gz') && !targetFileName.endsWith('.json.gz')) {
+        targetFileName = targetFileName.endsWith('.json')
+          ? `${targetFileName}.gz`
+          : `${targetFileName}.json.gz`;
+      }
+
+      const compressedInfo = compressJsonToGzip(backupData);
+      uploadBlob = new Blob([compressedInfo.compressedData.buffer], { type: 'application/gzip' });
+      originalSize = compressedInfo.originalSize;
+      compressedSize = compressedInfo.compressedSize;
+      savingsPercent = compressedInfo.savingsPercent;
+    } else {
+      const jsonString = typeof backupData === 'string' ? backupData : JSON.stringify(backupData, null, 2);
+      uploadBlob = new Blob([jsonString], { type: 'application/json' });
+      originalSize = uploadBlob.size;
+      compressedSize = uploadBlob.size;
+    }
 
     const { data, error } = await client.storage
       .from(bucket)
-      .upload(targetFileName, blob, {
-        contentType: 'application/json',
+      .upload(targetFileName, uploadBlob, {
+        contentType: useGzipCompression ? 'application/gzip' : 'application/json',
         upsert: true
       });
 
@@ -700,9 +782,16 @@ export async function uploadJsonBackupToSupabaseBucket(
       return { success: false, error: error.message };
     }
 
-    return { success: true, path: data?.path || targetFileName, fileName: targetFileName };
+    return {
+      success: true,
+      path: data?.path || targetFileName,
+      fileName: targetFileName,
+      originalSize,
+      compressedSize,
+      savingsPercent
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to upload JSON file to Supabase Storage' };
+    return { success: false, error: err.message || 'Failed to upload file to Supabase Storage' };
   }
 }
 
@@ -718,7 +807,7 @@ export async function listJsonBackupsFromSupabaseBucket(
 
   try {
     const { data, error } = await client.storage.from(bucket).list('', {
-      limit: 100,
+      limit: 200,
       sortBy: { column: 'created_at', order: 'desc' }
     });
 
@@ -726,15 +815,21 @@ export async function listJsonBackupsFromSupabaseBucket(
       return { success: false, files: [], error: error.message };
     }
 
-    // Filter only json files or all items that are files
+    // Filter json, json.gz, gz, zip or any data files
     const jsonFiles: SupabaseStorageBackupFile[] = (data || [])
-      .filter(item => item.name && (item.name.endsWith('.json') || !item.id))
+      .filter(item => item.name && (
+        item.name.endsWith('.json') ||
+        item.name.endsWith('.gz') ||
+        item.name.endsWith('.zip') ||
+        !item.id
+      ))
       .map(item => ({
         name: item.name,
         id: item.id || item.name,
         created_at: item.created_at || (item.metadata?.created_at as string) || new Date().toISOString(),
         updated_at: item.updated_at || (item.metadata?.updated_at as string) || new Date().toISOString(),
-        size: item.metadata?.size || 0
+        size: item.metadata?.size || 0,
+        isCompressed: item.name.endsWith('.gz') || item.name.endsWith('.zip')
       }));
 
     return { success: true, files: jsonFiles };
@@ -765,12 +860,12 @@ export async function downloadJsonBackupFromSupabaseBucket(
       return { success: false, error: 'Downloaded empty file from Supabase Storage.' };
     }
 
-    const text = await data.text();
-    const parsed = JSON.parse(text);
+    const arrayBuffer = await data.arrayBuffer();
+    const parsedData = decompressGzipToJson(arrayBuffer);
 
-    return { success: true, data: parsed };
+    return { success: true, data: parsedData };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to download backup JSON file from Supabase Storage' };
+    return { success: false, error: err.message || 'Failed to download or decompress backup file from Supabase Storage' };
   }
 }
 

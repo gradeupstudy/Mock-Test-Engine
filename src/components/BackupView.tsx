@@ -11,11 +11,13 @@ import {
   Cloud,
   FileCheck,
   FolderSync,
-  Database
+  Database,
+  Archive,
+  Zap
 } from 'lucide-react';
 import { SupabaseStorageModal } from './SupabaseStorageModal';
 import { PinModal } from './PinModal';
-import { getStoredSupabaseConfig } from '../lib/supabaseClient';
+import { getStoredSupabaseConfig, compressJsonToGzip, decompressGzipToJson } from '../lib/supabaseClient';
 
 interface BackupViewProps {
   questions: Question[];
@@ -38,7 +40,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
   const supabaseConfig = getStoredSupabaseConfig();
   const isSupabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
 
-  const handleExportJson = () => {
+  const handleExportJson = (compressed: boolean = false) => {
     const backupData = {
       version: '2.5',
       exportDate: new Date().toISOString(),
@@ -48,19 +50,37 @@ export const BackupView: React.FC<BackupViewProps> = ({
       mockHistory
     };
 
-    const jsonStr = JSON.stringify(backupData, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    if (compressed) {
+      const { compressedData, originalSize, compressedSize, savingsPercent } = compressJsonToGzip(backupData);
+      const blob = new Blob([compressedData.buffer], { type: 'application/gzip' });
+      const url = URL.createObjectURL(blob);
 
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
-    setStatusMessage(`Exported backup containing ${questions.length} questions and ${mockHistory.length} mock tests.`);
+      const origMB = (originalSize / (1024 * 1024)).toFixed(2);
+      const compMB = (compressedSize / (1024 * 1024)).toFixed(2);
+      setStatusMessage(`Exported Gzip compressed backup (.json.gz). Size reduced from ${origMB}MB ➔ ${compMB}MB (${savingsPercent}% smaller)!`);
+    } else {
+      const jsonStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setStatusMessage(`Exported backup containing ${questions.length} questions and ${mockHistory.length} mock tests.`);
+    }
   };
 
   const handleExportMockHistoryJson = () => {
@@ -92,11 +112,11 @@ export const BackupView: React.FC<BackupViewProps> = ({
     if (!file) return;
 
     setIsRestoring(true);
-    setStatusMessage('Reading mock test backup JSON file...');
+    setStatusMessage('Reading and decompressing mock test backup file...');
 
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
+      const arrayBuffer = await file.arrayBuffer();
+      const parsed = decompressGzipToJson(arrayBuffer);
 
       const mocksToLoad = Array.isArray(parsed.mockHistory) ? parsed.mockHistory : (Array.isArray(parsed) ? parsed : null);
 
@@ -125,11 +145,11 @@ export const BackupView: React.FC<BackupViewProps> = ({
     if (!file) return;
 
     setIsRestoring(true);
-    setStatusMessage('Reading backup JSON file...');
+    setStatusMessage('Reading and decompressing backup file (.json, .json.gz, .gz)...');
 
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
+      const arrayBuffer = await file.arrayBuffer();
+      const parsed = decompressGzipToJson(arrayBuffer);
 
       if (!Array.isArray(parsed.questions)) {
         throw new Error('Invalid backup file structure: missing questions array');
@@ -151,7 +171,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
       onDataRestored();
     } catch (err: any) {
-      setStatusMessage(`Restore Failed: ${err.message || 'Invalid JSON file'}`);
+      setStatusMessage(`Restore Failed: ${err.message || 'Invalid backup file'}`);
     } finally {
       setIsRestoring(false);
     }
@@ -166,7 +186,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
           <span>Backup & Restore Question Bank</span>
         </h2>
         <p className="text-xs text-slate-400 mt-1">
-          Export your entire IndexedDB question bank and mock history as a portable JSON file or restore from a previous backup.
+          Export your entire IndexedDB question bank and mock history as a portable JSON or compressed Gzip file, or sync directly with Supabase Storage Buckets.
         </p>
       </div>
 
@@ -199,7 +219,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
                 <span>Supabase File Bucket Storage</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Store and restore full JSON backup files in Supabase Storage Buckets (e.g. "backups") with 1-click restore.
+                Store & restore compressed Gzip backup files (.json.gz) in Supabase Storage Buckets with automatic decompression.
               </p>
             </div>
           </div>
@@ -220,21 +240,32 @@ export const BackupView: React.FC<BackupViewProps> = ({
               <Download className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Export Complete Backup (JSON)</h3>
+              <h3 className="text-base font-bold text-white">Export Complete Backup</h3>
               <p className="text-xs text-slate-400 mt-1">
-                Downloads a single JSON file containing all {questions.length} questions, options, difficulty ratings, and mock test history.
+                Downloads all {questions.length} questions & mock tests as plain JSON or compressed Gzip (.json.gz, ~85% smaller).
               </p>
             </div>
           </div>
 
-          <button
-            onClick={handleExportJson}
-            disabled={questions.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export Question Bank JSON</span>
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={() => handleExportJson(true)}
+              disabled={questions.length === 0}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
+              title="Download Gzip compressed backup file (80-90% size reduction)"
+            >
+              <Archive className="w-3.5 h-3.5 text-amber-300" />
+              <span>Export Gzip Compressed (.json.gz)</span>
+            </button>
+            <button
+              onClick={() => handleExportJson(false)}
+              disabled={questions.length === 0}
+              className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 font-bold py-2 rounded-xl text-xs transition-colors flex items-center justify-center space-x-2"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>Export Uncompressed JSON</span>
+            </button>
+          </div>
         </div>
 
         {/* Restore Card */}
@@ -244,9 +275,9 @@ export const BackupView: React.FC<BackupViewProps> = ({
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Restore / Import Backup (JSON)</h3>
+              <h3 className="text-base font-bold text-white">Restore / Import Backup</h3>
               <p className="text-xs text-slate-400 mt-1">
-                Upload a previously saved Gradeup Study backup JSON file to restore questions into IndexedDB.
+                Upload a Gradeup Study backup file (supports standard <code>.json</code> and compressed <code>.json.gz</code> or <code>.gz</code>).
               </p>
             </div>
           </div>
@@ -257,8 +288,8 @@ export const BackupView: React.FC<BackupViewProps> = ({
             ) : (
               <Upload className="w-4 h-4" />
             )}
-            <span>{isRestoring ? 'Restoring File...' : 'Select Backup JSON File'}</span>
-            <input type="file" accept=".json" onChange={handleRestoreJson} className="hidden" />
+            <span>{isRestoring ? 'Restoring File...' : 'Select Backup (.json / .gz)'}</span>
+            <input type="file" accept=".json,.gz,.json.gz,.zip" onChange={handleRestoreJson} className="hidden" />
           </label>
         </div>
       </div>
@@ -290,7 +321,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
           <label className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center space-x-2 text-center border border-slate-700">
             <Upload className="w-4 h-4 text-emerald-400" />
             <span>Load / Restore Mock Tests JSON</span>
-            <input type="file" accept=".json" onChange={handleRestoreMockHistoryJson} className="hidden" />
+            <input type="file" accept=".json,.gz,.json.gz,.zip" onChange={handleRestoreMockHistoryJson} className="hidden" />
           </label>
         </div>
       </div>
