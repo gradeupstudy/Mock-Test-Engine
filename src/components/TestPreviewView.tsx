@@ -1103,7 +1103,7 @@ Return ONLY valid JSON matching this schema:
               <div className="flex items-center space-x-2">
                 <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
                 <span>
-                  Each MCQ displays a live <strong>Uniqueness Indicator</strong> showing past paper usage. Click <strong className="text-purple-300 bg-purple-950 border border-purple-800 px-1.5 py-0.5 rounded text-[10px]">👆 Swipe / Swap (स्वाइप / बदलें)</strong> to swipe through fresh candidate questions!
+                  Each MCQ displays a live <strong>Uniqueness Indicator</strong> showing past paper usage. Click <strong className="text-purple-300 bg-purple-950 border border-purple-800 px-1.5 py-0.5 rounded text-[10px]">Manual Swap</strong> to swipe through fresh candidate questions!
                 </span>
               </div>
               {selectedUniquenessFilter !== 'ALL' && (
@@ -1261,10 +1261,10 @@ Return ONLY valid JSON matching this schema:
                         setSwipeCandidatePos(0);
                       }}
                       className="px-2.5 py-1.5 bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 hover:from-purple-800 hover:to-blue-800 text-purple-200 border border-purple-600/80 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shadow-md hover:scale-[1.02]"
-                      title="Open interactive candidate carousel to Swipe & Swap this question with a fresh MCQ from Question Bank or AI"
+                      title="Open interactive candidate carousel to manually swap this question with a fresh MCQ from Question Bank or AI"
                     >
                       <ArrowLeftRight className="w-3.5 h-3.5 text-purple-300" />
-                      <span>👆 Swipe / Swap (स्वाइप / बदलें)</span>
+                      <span>Manual Swap</span>
                     </button>
 
                     <button
