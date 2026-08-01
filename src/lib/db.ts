@@ -1,8 +1,8 @@
-import { Question, MockHistory, Template, OfficialPaperStyle } from '../types';
+import { Question, MockHistory, Template, OfficialPaperStyle, ExamPreset } from '../types';
 import { INITIAL_QUESTIONS } from './sampleQuestions';
 
 const DB_NAME = 'GradeupStudyDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const OFFICIAL_PAPER_STYLES: OfficialPaperStyle[] = [
   {
@@ -302,6 +302,10 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('templates')) {
         db.createObjectStore('templates', { keyPath: 'id', autoIncrement: true });
       }
+
+      if (!db.objectStoreNames.contains('examPresets')) {
+        db.createObjectStore('examPresets', { keyPath: 'id', autoIncrement: true });
+      }
     };
 
     request.onsuccess = (event) => {
@@ -314,6 +318,54 @@ function openDatabase(): Promise<IDBDatabase> {
     };
   });
 }
+
+export const DEFAULT_EXAM_PRESETS: Omit<ExamPreset, 'id'>[] = [
+  {
+    presetName: 'HP Home Guard Blueprint',
+    examName: 'HP Home Guard Exam',
+    totalMarks: 50,
+    duration: 60,
+    sections: [
+      { id: 'sec_hg_1', subject: 'General Knowledge', questionCount: 20, chapterDistribution: {} },
+      { id: 'sec_hg_2', subject: 'Hindi Language', questionCount: 15, chapterDistribution: {} },
+      { id: 'sec_hg_3', subject: 'English Language', questionCount: 15, chapterDistribution: {} }
+    ],
+    excludeLastN: 3,
+    uniqueThreshold: 85,
+    irtProfile: 'balanced'
+  },
+  {
+    presetName: 'SSC CGL Tier-1 Blueprint',
+    examName: 'SSC CGL Examination',
+    totalMarks: 200,
+    duration: 60,
+    sections: [
+      { id: 'sec_cgl_1', subject: 'General Intelligence & Reasoning', questionCount: 25, chapterDistribution: {} },
+      { id: 'sec_cgl_2', subject: 'General Awareness', questionCount: 25, chapterDistribution: {} },
+      { id: 'sec_cgl_3', subject: 'Quantitative Aptitude', questionCount: 25, chapterDistribution: {} },
+      { id: 'sec_cgl_4', subject: 'English Comprehension', questionCount: 25, chapterDistribution: {} }
+    ],
+    excludeLastN: 3,
+    uniqueThreshold: 90,
+    irtProfile: 'balanced'
+  },
+  {
+    presetName: 'HP Police Constable Blueprint',
+    examName: 'HP Police Constable Exam',
+    totalMarks: 80,
+    duration: 60,
+    sections: [
+      { id: 'sec_pc_1', subject: 'General Knowledge', questionCount: 25, chapterDistribution: {} },
+      { id: 'sec_pc_2', subject: 'Mathematics & Reasoning', questionCount: 20, chapterDistribution: {} },
+      { id: 'sec_pc_3', subject: 'Hindi Language', questionCount: 15, chapterDistribution: {} },
+      { id: 'sec_pc_4', subject: 'English Language', questionCount: 15, chapterDistribution: {} },
+      { id: 'sec_pc_5', subject: 'General Science', questionCount: 5, chapterDistribution: {} }
+    ],
+    excludeLastN: 3,
+    uniqueThreshold: 85,
+    irtProfile: 'balanced'
+  }
+];
 
 // Ensure database is initialized
 export async function initDatabase(): Promise<void> {
@@ -342,6 +394,25 @@ export async function initDatabase(): Promise<void> {
       const txAddT = db.transaction('templates', 'readwrite');
       const storeAddT = txAddT.objectStore('templates');
       storeAddT.add(DEFAULT_TEMPLATE);
+    }
+  };
+
+  // Check examPresets count
+  const txP = db.transaction('examPresets', 'readonly');
+  const storeP = txP.objectStore('examPresets');
+  const pCountReq = storeP.count();
+
+  pCountReq.onsuccess = () => {
+    if (pCountReq.result === 0) {
+      const txAddP = db.transaction('examPresets', 'readwrite');
+      const storeAddP = txAddP.objectStore('examPresets');
+      DEFAULT_EXAM_PRESETS.forEach(p => {
+        storeAddP.add({
+          ...p,
+          createdDate: new Date().toISOString(),
+          updatedDate: new Date().toISOString()
+        });
+      });
     }
   };
 }
@@ -573,6 +644,94 @@ export async function deleteTemplate(id: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('templates', 'readwrite');
     const store = tx.objectStore('templates');
+    const request = store.delete(id);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Exam Presets / Blueprints API
+export async function getAllExamPresets(): Promise<ExamPreset[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('examPresets', 'readwrite');
+    const store = tx.objectStore('examPresets');
+    const request = store.getAll();
+
+    request.onsuccess = async () => {
+      let result: ExamPreset[] = request.result || [];
+      
+      // If store is empty, seed defaults
+      if (result.length === 0) {
+        for (const p of DEFAULT_EXAM_PRESETS) {
+          const toAdd = {
+            ...p,
+            createdDate: new Date().toISOString(),
+            updatedDate: new Date().toISOString()
+          };
+          const addReq = store.add(toAdd);
+          await new Promise(r => { addReq.onsuccess = r; addReq.onerror = r; });
+        }
+        // Refetch after seeding
+        const refetchReq = store.getAll();
+        refetchReq.onsuccess = () => resolve(refetchReq.result || []);
+        refetchReq.onerror = () => resolve(DEFAULT_EXAM_PRESETS.map((p, i) => ({ ...p, id: i + 1 })));
+        return;
+      }
+
+      // Ensure every preset has valid sections array
+      const repaired = result.map(p => {
+        if (!p.sections || !Array.isArray(p.sections) || p.sections.length === 0) {
+          // Fallback sections based on preset name or exam name
+          const matchDefault = DEFAULT_EXAM_PRESETS.find(d => d.presetName === p.presetName || d.examName === p.examName);
+          return {
+            ...p,
+            sections: matchDefault?.sections || [
+              { id: 'sec_gen_1', subject: 'General Knowledge', questionCount: 20, chapterDistribution: {} },
+              { id: 'sec_gen_2', subject: 'Mathematics & Reasoning', questionCount: 15, chapterDistribution: {} }
+            ]
+          };
+        }
+        return p;
+      });
+
+      resolve(repaired);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveExamPreset(preset: ExamPreset): Promise<number> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('examPresets', 'readwrite');
+    const store = tx.objectStore('examPresets');
+    
+    const toSave = {
+      ...preset,
+      updatedDate: new Date().toISOString(),
+      createdDate: preset.createdDate || new Date().toISOString()
+    };
+
+    let request: IDBRequest;
+    if (toSave.id !== undefined && toSave.id !== null) {
+      request = store.put(toSave);
+    } else {
+      const { id, ...dataWithoutId } = toSave;
+      request = store.add(dataWithoutId);
+    }
+
+    request.onsuccess = () => resolve(request.result as number);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteExamPreset(id: number): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('examPresets', 'readwrite');
+    const store = tx.objectStore('examPresets');
     const request = store.delete(id);
 
     request.onsuccess = () => resolve();

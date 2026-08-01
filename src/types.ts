@@ -140,3 +140,17 @@ export interface SectionConfig {
   questionCount: number;
   chapterDistribution: Record<string, number>;
 }
+
+export interface ExamPreset {
+  id?: number;
+  presetName: string;
+  examName: string;
+  totalMarks: number;
+  duration: number;
+  sections: SectionConfig[];
+  excludeLastN?: number;
+  uniqueThreshold?: number;
+  irtProfile?: string;
+  createdDate?: string;
+  updatedDate?: string;
+}

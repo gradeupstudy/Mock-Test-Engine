@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Question } from '../types';
+import { Question, MockHistory } from '../types';
 import { callAiExplain, callAiTranslateDualLanguage, directClientAiCall } from '../lib/aiClient';
 import { sanitizeBilingualQuestionAndTranslation } from '../lib/exportUtils';
 import { getAllQuestions } from '../lib/db';
@@ -33,7 +33,9 @@ import {
   AlertTriangle,
   Move,
   ArrowLeftRight,
-  RefreshCw
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface TestPreviewViewProps {
@@ -43,6 +45,7 @@ interface TestPreviewViewProps {
   duration: number;
   uniquenessScore?: number;
   allBankQuestions?: Question[];
+  mockHistory?: MockHistory[];
   onUpdateTestQuestions: (qs: Question[]) => void;
   onNavigateToExport: () => void;
 }
@@ -54,6 +57,7 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   duration,
   uniquenessScore = 100,
   allBankQuestions = [],
+  mockHistory = [],
   onUpdateTestQuestions,
   onNavigateToExport
 }) => {
@@ -68,8 +72,14 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   const [jumpModalIdx, setJumpModalIdx] = useState<number | null>(null);
   const [targetPosInput, setTargetPosInput] = useState<string>('');
 
-  // Smart Swap State
+  // Smart Swap & Swipe Deck State
   const [smartSwappingIdx, setSmartSwappingIdx] = useState<number | null>(null);
+  const [swipeDeckIdx, setSwipeDeckIdx] = useState<number | null>(null);
+  const [swipeCandidatePos, setSwipeCandidatePos] = useState<number>(0);
+  const [isGeneratingSwipeAi, setIsGeneratingSwipeAi] = useState<boolean>(false);
+
+  // Uniqueness Filter State
+  const [selectedUniquenessFilter, setSelectedUniquenessFilter] = useState<'ALL' | 'FRESH' | 'USED' | 'REPEATED'>('ALL');
 
   // Dual Language Translation State
   const [isTranslatingBilingual, setIsTranslatingBilingual] = useState<boolean>(false);
@@ -78,6 +88,76 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
 
   // MCQs Inspection Suite Modal State
   const [isInspectionModalOpen, setIsInspectionModalOpen] = useState<boolean>(false);
+
+  // Helper: Calculate question uniqueness details and past mock paper matches
+  const getQuestionUniquenessDetails = (q: Question) => {
+    const usage = q.usageCount || 0;
+
+    const matchedMocks = (mockHistory || []).filter(m => {
+      if (q.id !== undefined && m.questionIds && m.questionIds.includes(q.id)) {
+        return true;
+      }
+      return false;
+    });
+
+    const mockNames = Array.from(new Set(matchedMocks.map(m => m.testName || `Mock Test #${m.mockId || m.id}`)));
+
+    if (usage === 0 && mockNames.length === 0) {
+      return {
+        status: 'Fresh' as const,
+        uniquenessPercent: 100,
+        badgeLabel: '100% Fresh - Never Used',
+        badgeHindi: '100% नया - ताज़ा प्रश्न',
+        colorClass: 'bg-emerald-950/90 text-emerald-300 border-emerald-600/70 shadow-sm',
+        badgeBg: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40',
+        icon: ShieldCheck,
+        mockNames: []
+      };
+    } else if (usage === 1 || mockNames.length === 1) {
+      const firstMock = mockNames[0] || 'Previous Mock Paper';
+      return {
+        status: 'Used' as const,
+        uniquenessPercent: 70,
+        badgeLabel: `Used 1x (${firstMock})`,
+        badgeHindi: `1 बार प्रयुक्त (${firstMock})`,
+        colorClass: 'bg-amber-950/90 text-amber-300 border-amber-600/70 shadow-sm',
+        badgeBg: 'bg-amber-500/10 text-amber-300 border-amber-500/40',
+        icon: AlertTriangle,
+        mockNames
+      };
+    } else {
+      const countDisplay = usage > 0 ? usage : Math.max(2, mockNames.length);
+      return {
+        status: 'Repeated' as const,
+        uniquenessPercent: Math.max(10, 100 - countDisplay * 20),
+        badgeLabel: `Repeated ${countDisplay}x in Mock Papers`,
+        badgeHindi: `${countDisplay} बार प्रयुक्त (दोहराया गया)`,
+        colorClass: 'bg-rose-950/90 text-rose-300 border-rose-600/70 shadow-sm',
+        badgeBg: 'bg-rose-500/10 text-rose-300 border-rose-500/40',
+        icon: ShieldAlert,
+        mockNames
+      };
+    }
+  };
+
+  // Overall Uniqueness Statistics
+  const uniquenessStats = useMemo(() => {
+    let fresh = 0;
+    let used = 0;
+    let repeated = 0;
+
+    questions.forEach(q => {
+      const info = getQuestionUniquenessDetails(q);
+      if (info.status === 'Fresh') fresh++;
+      else if (info.status === 'Used') used++;
+      else repeated++;
+    });
+
+    const total = questions.length;
+    const overallFreshPercent = total > 0 ? Math.round((fresh / total) * 100) : 100;
+
+    return { fresh, used, repeated, total, overallFreshPercent };
+  }, [questions, mockHistory]);
 
   // Quick 360 Inspection Stats for Badge
   const inspectionSummary = useMemo(() => {
@@ -118,15 +198,161 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
     })).sort((a, b) => b.count - a.count);
   }, [questions]);
 
-  // Filtered Questions list preserving original index
+  // Filtered Questions list preserving original index and applying section + uniqueness filters
   const filteredQuestionsList = useMemo(() => {
-    if (selectedFilterSection === 'ALL') {
-      return questions.map((q, originalIndex) => ({ q, originalIndex }));
-    }
     return questions
       .map((q, originalIndex) => ({ q, originalIndex }))
-      .filter(item => (item.q.subject || '').trim().toLowerCase() === selectedFilterSection.trim().toLowerCase());
-  }, [questions, selectedFilterSection]);
+      .filter(item => {
+        if (selectedFilterSection !== 'ALL') {
+          if ((item.q.subject || '').trim().toLowerCase() !== selectedFilterSection.trim().toLowerCase()) {
+            return false;
+          }
+        }
+        if (selectedUniquenessFilter !== 'ALL') {
+          const info = getQuestionUniquenessDetails(item.q);
+          if (selectedUniquenessFilter === 'FRESH' && info.status !== 'Fresh') return false;
+          if (selectedUniquenessFilter === 'USED' && info.status !== 'Used') return false;
+          if (selectedUniquenessFilter === 'REPEATED' && info.status !== 'Repeated') return false;
+        }
+        return true;
+      });
+  }, [questions, selectedFilterSection, selectedUniquenessFilter, mockHistory]);
+
+  // Swipe Deck Candidates Computation
+  const swipeCandidates = useMemo(() => {
+    if (swipeDeckIdx === null || !questions[swipeDeckIdx]) return [];
+    const targetQ = questions[swipeDeckIdx];
+    const targetSub = (targetQ.subject || '').trim().toLowerCase();
+    const targetChap = (targetQ.chapter || '').trim().toLowerCase();
+
+    const combinedBank = [...bankQuestions, ...allBankQuestions];
+    const currentTestTexts = new Set(questions.map(q => q.question.trim().toLowerCase()));
+
+    const available = combinedBank.filter(q => {
+      const text = q.question.trim().toLowerCase();
+      return !currentTestTexts.has(text);
+    });
+
+    const uniqueMap = new Map<string, Question>();
+    available.forEach(q => {
+      const text = q.question.trim().toLowerCase();
+      if (!uniqueMap.has(text)) {
+        uniqueMap.set(text, q);
+      }
+    });
+
+    const candidateList = Array.from(uniqueMap.values());
+
+    const tier1 = candidateList.filter(q => {
+      const s = (q.subject || '').trim().toLowerCase();
+      const c = (q.chapter || '').trim().toLowerCase();
+      return (s === targetSub || !targetSub) && (c === targetChap || !targetChap);
+    });
+
+    const tier2 = candidateList.filter(q => {
+      const s = (q.subject || '').trim().toLowerCase();
+      return (s === targetSub || !targetSub) && !tier1.includes(q);
+    });
+
+    const tier3 = candidateList.filter(q => !tier1.includes(q) && !tier2.includes(q));
+
+    const sortFresh = (arr: Question[]) => [...arr].sort((a, b) => (a.usageCount || 0) - (b.usageCount || 0));
+
+    return [...sortFresh(tier1), ...sortFresh(tier2), ...sortFresh(tier3)];
+  }, [swipeDeckIdx, questions, bankQuestions, allBankQuestions]);
+
+  // Keyboard listener for Swipe Deck navigation
+  useEffect(() => {
+    if (swipeDeckIdx === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setSwipeCandidatePos(prev => (prev > 0 ? prev - 1 : Math.max(0, swipeCandidates.length - 1)));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setSwipeCandidatePos(prev => (swipeCandidates.length > 0 ? (prev + 1) % swipeCandidates.length : 0));
+      } else if (e.key === 'Escape') {
+        setSwipeDeckIdx(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [swipeDeckIdx, swipeCandidates.length]);
+
+  // Apply candidate replacement from Swipe Deck
+  const handleApplySwipeCandidate = (candidate: Question) => {
+    if (swipeDeckIdx === null) return;
+    const updated = [...questions];
+    updated[swipeDeckIdx] = candidate;
+    setQuestions(updated);
+    setIsSaved(false);
+    onUpdateTestQuestions(updated);
+
+    setAddNotification(`👆 Swapped Q #${swipeDeckIdx + 1} with a fresh candidate from "${candidate.subject || 'Subject'}"!`);
+    setTimeout(() => setAddNotification(null), 3500);
+
+    setSwipeDeckIdx(null);
+    setSwipeCandidatePos(0);
+  };
+
+  // Generate fresh AI candidate directly inside Swipe Deck
+  const handleGenerateAiSwipeCandidate = async () => {
+    if (swipeDeckIdx === null || !questions[swipeDeckIdx]) return;
+    const targetQ = questions[swipeDeckIdx];
+    const sub = (targetQ.subject || 'General').trim();
+    const chap = (targetQ.chapter || 'General').trim();
+    const diff = targetQ.difficulty || 'Moderate';
+
+    setIsGeneratingSwipeAi(true);
+    try {
+      const systemInstruction = `You are an expert exam question author. Generate 1 high-quality Multiple Choice Question (MCQ) in JSON format.
+Return ONLY valid JSON matching this schema:
+{
+  "question": "Question statement here",
+  "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+  "answer": "A",
+  "explanation": "Brief explanation",
+  "subject": "${sub}",
+  "chapter": "${chap}",
+  "difficulty": "${diff}"
+}`;
+
+      const prompt = `Generate a fresh, unique MCQ for Subject: "${sub}", Chapter: "${chap}", Difficulty: "${diff}". Ensure accuracy.`;
+
+      const aiResponseText = await directClientAiCall(prompt, systemInstruction);
+      const cleanJson = aiResponseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+
+      if (!parsed || !parsed.question) {
+        throw new Error('AI generated incomplete MCQ payload.');
+      }
+
+      const opts = parsed.options || {};
+      const newMcq: Question = {
+        question: parsed.question,
+        optionA: opts.A || parsed.optionA || 'Option A',
+        optionB: opts.B || parsed.optionB || 'Option B',
+        optionC: opts.C || parsed.optionC || 'Option C',
+        optionD: opts.D || parsed.optionD || 'Option D',
+        answer: (parsed.answer || 'A').toString().trim().toUpperCase().slice(0, 1) as 'A' | 'B' | 'C' | 'D',
+        explanation: parsed.explanation || '',
+        subject: parsed.subject || sub,
+        chapter: parsed.chapter || chap,
+        difficulty: (parsed.difficulty || diff) as any,
+        usageCount: 0,
+        questionStatus: 'Fresh',
+        chapterCoverageScore: 100,
+        createdDate: new Date().toISOString(),
+        updatedDate: new Date().toISOString()
+      };
+
+      handleApplySwipeCandidate(newMcq);
+    } catch (err: any) {
+      alert('AI Candidate generation failed: ' + err.message);
+    } finally {
+      setIsGeneratingSwipeAi(false);
+    }
+  };
 
   // Custom question form state
   const [customSubject, setCustomSubject] = useState<string>('');
@@ -805,150 +1031,256 @@ Return ONLY valid JSON matching this schema:
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Quick Position Reorder Notice */}
-          <div className="bg-slate-950/90 border border-slate-800 p-3 rounded-xl flex items-center justify-between text-xs text-slate-300 shadow-sm">
-            <div className="flex items-center space-x-2">
-              <RefreshCw className="w-4 h-4 text-purple-400 flex-shrink-0" />
-              <span>
-                <strong className="text-purple-300">Smart Question Swap:</strong> Click <strong className="text-purple-300 bg-purple-950 border border-purple-800 px-1.5 py-0.5 rounded text-[11px]">🔄 Smart Swap</strong> on any question to replace it with another MCQ from the same Subject & Chapter (from Bank or AI generated), or use <strong className="text-blue-300 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded font-mono text-[11px]">Move to #</strong> / <span className="bg-slate-900 border border-slate-700 text-slate-300 px-1.5 py-0.5 rounded font-mono text-[11px]">▲ / ▼</span> to reorder!
-              </span>
+          {/* Uniqueness & Usage Indicator Summary & Filter Bar */}
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
+              <div className="flex items-center space-x-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-bold text-white">
+                  Question Uniqueness & Repeat Tracking (प्रश्न मौलिकता संकेतक)
+                </span>
+                <span className="text-[11px] bg-slate-950 text-slate-300 border border-slate-800 px-2 py-0.5 rounded-md font-mono">
+                  {uniquenessStats.overallFreshPercent}% Fresh Paper
+                </span>
+              </div>
+
+              {/* Uniqueness Filter Tabs */}
+              <div className="flex items-center space-x-1 flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedUniquenessFilter('ALL')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors border ${
+                    selectedUniquenessFilter === 'ALL'
+                      ? 'bg-blue-600 text-white border-blue-500'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                  }`}
+                >
+                  All ({uniquenessStats.total})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUniquenessFilter('FRESH')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors border flex items-center space-x-1 ${
+                    selectedUniquenessFilter === 'FRESH'
+                      ? 'bg-emerald-600 text-white border-emerald-500'
+                      : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>100% Fresh ({uniquenessStats.fresh})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUniquenessFilter('USED')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors border flex items-center space-x-1 ${
+                    selectedUniquenessFilter === 'USED'
+                      ? 'bg-amber-600 text-white border-amber-500'
+                      : 'bg-amber-950/60 text-amber-300 border-amber-800/80 hover:bg-amber-900'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Used 1x ({uniquenessStats.used})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUniquenessFilter('REPEATED')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors border flex items-center space-x-1 ${
+                    selectedUniquenessFilter === 'REPEATED'
+                      ? 'bg-rose-600 text-white border-rose-500'
+                      : 'bg-rose-950/60 text-rose-300 border-rose-800/80 hover:bg-rose-900'
+                  }`}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-300" />
+                  <span>Repeated ({uniquenessStats.repeated})</span>
+                </button>
+              </div>
             </div>
-            <span className="hidden md:inline-block text-[10px] bg-blue-950 text-blue-300 px-2.5 py-1 rounded-md border border-blue-800 font-semibold whitespace-nowrap">
-              {questions.length} MCQs Auto-Saved
-            </span>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <div className="flex items-center space-x-2">
+                <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
+                <span>
+                  Each MCQ displays a live <strong>Uniqueness Indicator</strong> showing past paper usage. Click <strong className="text-purple-300 bg-purple-950 border border-purple-800 px-1.5 py-0.5 rounded text-[10px]">👆 Swipe / Swap (स्वाइप / बदलें)</strong> to swipe through fresh candidate questions!
+                </span>
+              </div>
+              {selectedUniquenessFilter !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedUniquenessFilter('ALL')}
+                  className="text-blue-400 hover:underline text-[11px]"
+                >
+                  Reset Filter
+                </button>
+              )}
+            </div>
           </div>
 
-          {filteredQuestionsList.map(({ q, originalIndex: idx }) => (
-            <div
-              key={idx}
-              className="bg-slate-900 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl space-y-4 transition-all shadow-sm relative"
-            >
-              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
-                <div className="flex items-center space-x-3 flex-wrap gap-2">
-                  <div className="flex items-center space-x-1.5">
-                    {/* Q # Badge */}
-                    <div className="flex items-center space-x-1 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg">
-                      <span className="text-xs font-bold text-white">Q #{idx + 1}</span>
-                    </div>
+          {filteredQuestionsList.map(({ q, originalIndex: idx }) => {
+            const uniqInfo = getQuestionUniquenessDetails(q);
+            const UniqIcon = uniqInfo.icon;
 
-                    {/* Up / Down Arrow Position Controls */}
-                    <div className="flex items-center space-x-0.5 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => handleMoveUp(idx)}
-                        disabled={idx === 0}
-                        className="p-1 text-slate-400 hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 rounded transition-colors"
-                        title="Move Question Up (▲)"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveDown(idx)}
-                        disabled={idx === questions.length - 1}
-                        className="p-1 text-slate-400 hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 rounded transition-colors"
-                        title="Move Question Down (▼)"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+            return (
+              <div
+                key={idx}
+                className="bg-slate-900 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl space-y-4 transition-all shadow-sm relative"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                  <div className="flex items-center space-x-3 flex-wrap gap-2">
+                    <div className="flex items-center space-x-1.5">
+                      {/* Q # Badge */}
+                      <div className="flex items-center space-x-1 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-lg">
+                        <span className="text-xs font-bold text-white">Q #{idx + 1}</span>
+                      </div>
 
-                    {/* Jump to Position Popover Trigger */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setJumpModalIdx(jumpModalIdx === idx ? null : idx);
-                          setTargetPosInput((idx + 1).toString());
-                        }}
-                        className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-blue-300 rounded-lg text-xs font-medium transition-colors flex items-center space-x-1"
-                        title="Jump question directly to specific position number (e.g. Move to #15)"
-                      >
-                        <Move className="w-3 h-3 text-blue-400" />
-                        <span className="hidden sm:inline">Move to #</span>
-                      </button>
-
-                      {jumpModalIdx === idx && (
-                        <div className="absolute top-full left-0 mt-1 bg-slate-950 border border-blue-500/80 p-2.5 rounded-xl shadow-2xl z-30 flex items-center space-x-2 animate-in fade-in zoom-in-95">
-                          <span className="text-[11px] text-slate-300 font-medium whitespace-nowrap">Target Pos:</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={questions.length}
-                            value={targetPosInput}
-                            onChange={e => setTargetPosInput(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                handleJumpToPosition(idx, parseInt(targetPosInput, 10));
-                              }
-                            }}
-                            className="w-14 bg-slate-900 border border-slate-700 text-white text-xs rounded px-2 py-1 font-bold text-center focus:outline-none focus:border-blue-400"
-                            autoFocus
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleJumpToPosition(idx, parseInt(targetPosInput, 10))}
-                            className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1 rounded font-bold transition-colors"
+                      {/* Uniqueness & Usage Indicator Badge */}
+                      <div className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1.5 ${uniqInfo.badgeBg} ${uniqInfo.colorClass}`}>
+                        <UniqIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span>{uniqInfo.badgeLabel}</span>
+                        {uniqInfo.mockNames.length > 0 && (
+                          <span
+                            className="cursor-help text-[10px] underline opacity-80 hover:opacity-100 ml-1"
+                            title={`Used in papers: ${uniqInfo.mockNames.join(', ')}`}
                           >
-                            Go
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setJumpModalIdx(null)}
-                            className="text-slate-400 hover:text-white p-1"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
+                            (Mocks: {uniqInfo.mockNames.length})
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Up / Down Arrow Position Controls */}
+                      <div className="flex items-center space-x-0.5 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveUp(idx)}
+                          disabled={idx === 0}
+                          className="p-1 text-slate-400 hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 rounded transition-colors"
+                          title="Move Question Up (▲)"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveDown(idx)}
+                          disabled={idx === questions.length - 1}
+                          className="p-1 text-slate-400 hover:text-blue-400 disabled:opacity-20 disabled:hover:text-slate-400 rounded transition-colors"
+                          title="Move Question Down (▼)"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Jump to Position Popover Trigger */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setJumpModalIdx(jumpModalIdx === idx ? null : idx);
+                            setTargetPosInput((idx + 1).toString());
+                          }}
+                          className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-blue-300 rounded-lg text-xs font-medium transition-colors flex items-center space-x-1"
+                          title="Jump question directly to specific position number (e.g. Move to #15)"
+                        >
+                          <Move className="w-3 h-3 text-blue-400" />
+                          <span className="hidden sm:inline">Move to #</span>
+                        </button>
+
+                        {jumpModalIdx === idx && (
+                          <div className="absolute top-full left-0 mt-1 bg-slate-950 border border-blue-500/80 p-2.5 rounded-xl shadow-2xl z-30 flex items-center space-x-2 animate-in fade-in zoom-in-95">
+                            <span className="text-[11px] text-slate-300 font-medium whitespace-nowrap">Target Pos:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={questions.length}
+                              value={targetPosInput}
+                              onChange={e => setTargetPosInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  handleJumpToPosition(idx, parseInt(targetPosInput, 10));
+                                }
+                              }}
+                              className="w-14 bg-slate-900 border border-slate-700 text-white text-xs rounded px-2 py-1 font-bold text-center focus:outline-none focus:border-blue-400"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleJumpToPosition(idx, parseInt(targetPosInput, 10))}
+                              className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1 rounded font-bold transition-colors"
+                            >
+                              Go
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setJumpModalIdx(null)}
+                              className="text-slate-400 hover:text-white p-1"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
                     </div>
 
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={q.subject}
+                        onChange={e => handleFieldChange(idx, 'subject', e.target.value)}
+                        placeholder="Subject"
+                        className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500 font-semibold"
+                      />
+                      <span className="text-slate-600">•</span>
+                      <input
+                        type="text"
+                        value={q.chapter}
+                        onChange={e => handleFieldChange(idx, 'chapter', e.target.value)}
+                        placeholder="Chapter"
+                        className="bg-slate-950 border border-slate-700 text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="text"
-                      value={q.subject}
-                      onChange={e => handleFieldChange(idx, 'subject', e.target.value)}
-                      placeholder="Subject"
-                      className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500 font-semibold"
-                    />
-                    <span className="text-slate-600">•</span>
-                    <input
-                      type="text"
-                      value={q.chapter}
-                      onChange={e => handleFieldChange(idx, 'chapter', e.target.value)}
-                      placeholder="Chapter"
-                      className="bg-slate-950 border border-slate-700 text-slate-300 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                </div>
+                    <select
+                      value={q.difficulty}
+                      onChange={e => handleFieldChange(idx, 'difficulty', e.target.value)}
+                      className="bg-slate-950 border border-slate-700 text-slate-300 text-xs rounded px-2 py-1"
+                    >
+                      <option value="Easy">Easy</option>
+                      <option value="Moderate">Moderate</option>
+                      <option value="Hard">Hard</option>
+                    </select>
 
-                <div className="flex items-center space-x-2">
-                  <select
-                    value={q.difficulty}
-                    onChange={e => handleFieldChange(idx, 'difficulty', e.target.value)}
-                    className="bg-slate-950 border border-slate-700 text-slate-300 text-xs rounded px-2 py-1"
-                  >
-                    <option value="Easy">Easy</option>
-                    <option value="Moderate">Moderate</option>
-                    <option value="Hard">Hard</option>
-                  </select>
+                    {/* Interactive Swipe & Swap Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSwipeDeckIdx(idx);
+                        setSwipeCandidatePos(0);
+                      }}
+                      className="px-2.5 py-1.5 bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 hover:from-purple-800 hover:to-blue-800 text-purple-200 border border-purple-600/80 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 shadow-md hover:scale-[1.02]"
+                      title="Open interactive candidate carousel to Swipe & Swap this question with a fresh MCQ from Question Bank or AI"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-purple-300" />
+                      <span>👆 Swipe / Swap (स्वाइप / बदलें)</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleSmartSwap(idx)}
-                    disabled={smartSwappingIdx === idx}
-                    className="px-2.5 py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-700/80 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 disabled:opacity-50 hover:scale-[1.02] shadow-sm"
-                    title={`Smart Swap this question with another question from Subject "${q.subject || 'Same'}" → Chapter "${q.chapter || 'Same'}" (from Question Bank or AI generated)`}
-                  >
-                    {smartSwappingIdx === idx ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-300" />
-                    ) : (
-                      <RefreshCw className="w-3.5 h-3.5 text-purple-300" />
-                    )}
-                    <span>Smart Swap</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSmartSwap(idx)}
+                      disabled={smartSwappingIdx === idx}
+                      className="px-2.5 py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-700/80 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 disabled:opacity-50 hover:scale-[1.02] shadow-sm"
+                      title={`Smart Swap this question with another question from Subject "${q.subject || 'Same'}" → Chapter "${q.chapter || 'Same'}" (from Question Bank or AI generated)`}
+                    >
+                      {smartSwappingIdx === idx ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-300" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5 text-purple-300" />
+                      )}
+                      <span>Auto Swap</span>
+                    </button>
 
                   <button
                     onClick={() => handleTranslateSingleDualLanguage(idx)}
@@ -1147,7 +1479,8 @@ Return ONLY valid JSON matching this schema:
                 </div>
               </div>
             </div>
-          ))}
+          );
+        })}
         </div>
       )}
 
@@ -1647,6 +1980,217 @@ Return ONLY valid JSON matching this schema:
           setQuestions(updatedList);
         }}
       />
+
+      {/* Modal: Interactive Candidate Swipe Deck & Question Swap Carousel */}
+      {swipeDeckIdx !== null && questions[swipeDeckIdx] && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-purple-500/50 rounded-2xl w-full max-w-3xl p-6 space-y-5 shadow-2xl my-8 animate-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                  <ArrowLeftRight className="w-5 h-5 text-purple-400" />
+                  <span>Interactive Question Swipe & Swap (प्रश्न स्वाइप एवं प्रतिस्थापन)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Target Position: <strong>Q #{swipeDeckIdx + 1}</strong> | Subject: <strong className="text-blue-300">{questions[swipeDeckIdx].subject}</strong> → Chapter: <strong className="text-purple-300">{questions[swipeDeckIdx].chapter}</strong>
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSwipeDeckIdx(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Question Currently in Test Paper */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Current MCQ in Test Paper (Q #{swipeDeckIdx + 1}):
+                </span>
+                {(() => {
+                  const currentUniq = getQuestionUniquenessDetails(questions[swipeDeckIdx]);
+                  const CIcon = currentUniq.icon;
+                  return (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${currentUniq.badgeBg} ${currentUniq.colorClass} flex items-center space-x-1`}>
+                      <CIcon className="w-3 h-3" />
+                      <span>{currentUniq.badgeLabel}</span>
+                    </span>
+                  );
+                })()}
+              </div>
+              <p className="text-xs text-white font-medium line-clamp-2">
+                {questions[swipeDeckIdx].question}
+              </p>
+            </div>
+
+            {/* Candidate Swipe Carousel Box */}
+            {swipeCandidates.length > 0 ? (
+              <div className="bg-gradient-to-b from-slate-950 to-slate-900 border border-purple-500/40 p-5 rounded-2xl space-y-4 shadow-xl relative">
+                {/* Top Carousel Navigation Controls */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-purple-300 bg-purple-950 border border-purple-800 px-2.5 py-1 rounded-lg">
+                      Candidate #{swipeCandidatePos + 1} of {swipeCandidates.length}
+                    </span>
+                    <span className="text-[11px] text-slate-400 hidden sm:inline">
+                      (Use ← / → Arrow keys or Swipe buttons)
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setSwipeCandidatePos(prev => (prev > 0 ? prev - 1 : swipeCandidates.length - 1))}
+                      className="bg-slate-800 hover:bg-purple-900 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all"
+                      title="Swipe Left / Previous Candidate (Key: ←)"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-purple-300" />
+                      <span>Swipe Prev</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSwipeCandidatePos(prev => (swipeCandidates.length > 0 ? (prev + 1) % swipeCandidates.length : 0))}
+                      className="bg-slate-800 hover:bg-purple-900 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-all"
+                      title="Swipe Right / Next Candidate (Key: →)"
+                    >
+                      <span>Swipe Next</span>
+                      <ChevronRight className="w-4 h-4 text-purple-300" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Active Swipe Candidate Card Display */}
+                {(() => {
+                  const activeCandidate = swipeCandidates[swipeCandidatePos] || swipeCandidates[0];
+                  const candidateUniq = getQuestionUniquenessDetails(activeCandidate);
+                  const CandIcon = candidateUniq.icon;
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs font-bold text-white bg-indigo-950 border border-indigo-700/80 px-2.5 py-1 rounded-lg">
+                            Subject: {activeCandidate.subject}
+                          </span>
+                          <span className="text-xs font-medium text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">
+                            Topic: {activeCandidate.chapter}
+                          </span>
+                        </div>
+
+                        <div className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1 ${candidateUniq.badgeBg} ${candidateUniq.colorClass}`}>
+                          <CandIcon className="w-3.5 h-3.5" />
+                          <span>{candidateUniq.badgeLabel}</span>
+                        </div>
+                      </div>
+
+                      {/* Question Statement */}
+                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider block">
+                          Candidate Question Statement:
+                        </span>
+                        <p className="text-sm font-semibold text-white leading-relaxed">
+                          <MathText text={activeCandidate.question} />
+                        </p>
+                        {activeCandidate.translation && (
+                          <p className="text-xs text-indigo-300 font-medium pt-1 border-t border-slate-800">
+                            <MathText text={activeCandidate.translation} />
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Options Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div className={`p-2.5 rounded-lg border ${activeCandidate.answer === 'A' ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>
+                          <strong className="mr-1.5">A.</strong> <MathText text={activeCandidate.optionA} />
+                        </div>
+                        <div className={`p-2.5 rounded-lg border ${activeCandidate.answer === 'B' ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>
+                          <strong className="mr-1.5">B.</strong> <MathText text={activeCandidate.optionB} />
+                        </div>
+                        <div className={`p-2.5 rounded-lg border ${activeCandidate.answer === 'C' ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>
+                          <strong className="mr-1.5">C.</strong> <MathText text={activeCandidate.optionC} />
+                        </div>
+                        <div className={`p-2.5 rounded-lg border ${activeCandidate.answer === 'D' ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>
+                          <strong className="mr-1.5">D.</strong> <MathText text={activeCandidate.optionD} />
+                        </div>
+                      </div>
+
+                      {activeCandidate.explanation && (
+                        <div className="bg-slate-950/80 p-3 rounded-xl border border-purple-900/40 text-xs text-purple-200">
+                          <strong className="text-purple-400 block text-[10px] uppercase mb-0.5">Solution / Explanation:</strong>
+                          <MathText text={activeCandidate.explanation} />
+                        </div>
+                      )}
+
+                      {/* Primary Swap Action Button */}
+                      <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <span className="text-xs text-emerald-400 font-semibold flex items-center space-x-1">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Candidate ready to swap into Q #{swipeDeckIdx + 1}</span>
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplySwipeCandidate(activeCandidate)}
+                          className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-6 py-2.5 rounded-xl text-xs shadow-lg transition-all flex items-center justify-center space-x-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Apply Swipe & Swap Question (स्वाइप लागू करें)</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="bg-slate-950 p-8 rounded-2xl border border-dashed border-slate-800 text-center space-y-3">
+                <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
+                <p className="text-xs text-slate-300">
+                  No additional unused questions found in Question Bank for Subject "{questions[swipeDeckIdx].subject}".
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  You can generate a brand new 100% fresh MCQ using AI instantly below!
+                </p>
+              </div>
+            )}
+
+            {/* AI Candidate Generation Footer */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={handleGenerateAiSwipeCandidate}
+                disabled={isGeneratingSwipeAi}
+                className="w-full sm:w-auto bg-purple-900/80 hover:bg-purple-800 text-purple-200 border border-purple-600 px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                {isGeneratingSwipeAi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-300" />
+                    <span>Generating Fresh AI Candidate...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-purple-300" />
+                    <span>Generate Fresh AI Candidate for this Topic</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSwipeDeckIdx(null)}
+                className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2 rounded-xl text-xs"
+              >
+                Close Swipe Deck
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

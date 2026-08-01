@@ -22,7 +22,12 @@ import {
   Layers,
   Award,
   Globe,
-  Settings2
+  Settings2,
+  BookOpen,
+  Plus,
+  Trash2,
+  BookmarkCheck,
+  Star
 } from 'lucide-react';
 
 interface TemplatesViewProps {
@@ -30,15 +35,17 @@ interface TemplatesViewProps {
   templates: Template[];
   onSaveTemplate: (t: Template) => Promise<void>;
   onSetDefaultTemplate: (t: Template) => void;
+  onDeleteTemplate?: (id: number) => Promise<void>;
 }
 
 export const TemplatesView: React.FC<TemplatesViewProps> = ({
   currentTemplate,
   templates,
   onSaveTemplate,
-  onSetDefaultTemplate
+  onSetDefaultTemplate,
+  onDeleteTemplate
 }) => {
-  const [activeTab, setActiveTab] = useState<'official' | 'customize'>('official');
+  const [activeTab, setActiveTab] = useState<'official' | 'customize' | 'saved'>('official');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [templateForm, setTemplateForm] = useState<Template>(currentTemplate);
@@ -98,7 +105,8 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
     };
     setTemplateForm(updated);
     onSetDefaultTemplate(updated);
-    setSaveNotice(`Applied "${style.name}" as your active paper template!`);
+    onSaveTemplate(updated);
+    setSaveNotice(`Applied "${style.name}" as your active paper template & saved permanently!`);
     setTimeout(() => setSaveNotice(null), 3500);
   };
 
@@ -179,8 +187,23 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
   const handleSave = async () => {
     await onSaveTemplate(templateForm);
-    setSaveNotice('Template configuration saved successfully!');
-    setTimeout(() => setSaveNotice(null), 3000);
+    setSaveNotice(`Template details for "${templateForm.name}" permanently saved in database!`);
+    setTimeout(() => setSaveNotice(null), 3500);
+  };
+
+  const handleSaveAsNew = async () => {
+    const newName = prompt('Enter a title for this new template copy:', `${templateForm.name} (Custom)`);
+    if (!newName || !newName.trim()) return;
+
+    const { id, ...rest } = templateForm;
+    const newTemplate: Template = {
+      ...rest,
+      name: newName.trim()
+    };
+    await onSaveTemplate(newTemplate);
+    setTemplateForm(newTemplate);
+    setSaveNotice(`New template "${newName.trim()}" saved permanently! You can edit or reuse it anytime.`);
+    setTimeout(() => setSaveNotice(null), 4000);
   };
 
   return (
@@ -193,7 +216,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
             <span>Official Exam Templates & Direct Print Formats</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Choose from 16+ real-world official exam formats (SSC, UPSC, NTA, Banking, Board Exams, Defense, Coaching Series). Direct print ready with instant PDF export!
+            Choose from 16+ real-world official exam formats or customize your own permanently. Edit Exam Names, fonts, watermarks, and header styles anytime!
           </p>
         </div>
 
@@ -201,7 +224,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
         <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shrink-0">
           <button
             onClick={() => setActiveTab('official')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
               activeTab === 'official'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -210,16 +233,29 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
             <Award className="w-3.5 h-3.5" />
             <span>Official Formats (16)</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('saved')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+              activeTab === 'saved'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <BookmarkCheck className="w-3.5 h-3.5 text-indigo-300" />
+            <span>Saved Templates ({templates.length})</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('customize')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
               activeTab === 'customize'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
             }`}
           >
             <Settings2 className="w-3.5 h-3.5" />
-            <span>Customize & Print Preview</span>
+            <span>Customize & Edit Details</span>
           </button>
         </div>
       </div>
@@ -230,6 +266,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
           <span>{saveNotice}</span>
         </div>
       )}
+
 
       {/* Tab 1: Official Styles Catalog */}
       {activeTab === 'official' && (
@@ -375,12 +412,133 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
         </div>
       )}
 
-      {/* Tab 2: Customize & Direct Print Visualizer */}
+      {/* Tab 2: Saved Templates Library */}
+      {activeTab === 'saved' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                <BookmarkCheck className="w-4 h-4 text-indigo-400" />
+                <span>Saved Templates in Database ({templates.length})</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                All templates saved in IndexedDB are stored permanently. You can edit exam names, set active defaults, or make new template copies anytime.
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                setTemplateForm(currentTemplate);
+                setActiveTab('customize');
+              }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-md shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Custom Template</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map(t => {
+              const isDefault = currentTemplate.id === t.id || currentTemplate.name === t.name;
+
+              return (
+                <div
+                  key={t.id || t.name}
+                  className={`bg-slate-900 border ${
+                    isDefault ? 'border-indigo-500/80 ring-1 ring-indigo-500/50' : 'border-slate-800'
+                  } rounded-2xl p-4 space-y-3 relative flex flex-col justify-between shadow-sm`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-xs font-bold text-white line-clamp-1">{t.name}</h4>
+                      {isDefault && (
+                        <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-700 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 shrink-0">
+                          <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                          <span>Active Default</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-slate-300 space-y-1 bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                      <div>
+                        <strong className="text-slate-400">Exam Name:</strong>{' '}
+                        <span className="text-amber-300 font-bold">{t.header.examName || 'Standard Exam'}</span>
+                      </div>
+                      <div>
+                        <strong className="text-slate-400">Institute:</strong>{' '}
+                        <span className="text-slate-200">{t.header.instituteName}</span>
+                      </div>
+                      <div>
+                        <strong className="text-slate-400">Font & Style:</strong>{' '}
+                        <span className="text-blue-300">{t.header.font} ({t.header.headerStyle})</span>
+                      </div>
+                      {t.header.watermark && (
+                        <div>
+                          <strong className="text-slate-400">Watermark:</strong>{' '}
+                          <span className="text-slate-300 font-mono">{t.header.watermark}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setTemplateForm(t);
+                        setActiveTab('customize');
+                      }}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-1.5 px-3 rounded-lg text-xs border border-slate-700 flex items-center justify-center space-x-1"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Edit Details</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        onSetDefaultTemplate(t);
+                        onSaveTemplate(t);
+                        setSaveNotice(`Set "${t.name}" as active paper template!`);
+                        setTimeout(() => setSaveNotice(null), 3000);
+                      }}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-colors ${
+                        isDefault
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                          : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                      }`}
+                    >
+                      {isDefault ? 'Active' : 'Set Active'}
+                    </button>
+
+                    {onDeleteTemplate && t.id && (
+                      <button
+                        onClick={async () => {
+                          if (confirm(`Delete saved template "${t.name}"?`)) {
+                            await onDeleteTemplate(t.id!);
+                            setSaveNotice(`Template deleted successfully.`);
+                            setTimeout(() => setSaveNotice(null), 3000);
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800"
+                        title="Delete Template"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Customize & Direct Print Visualizer */}
       {activeTab === 'customize' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Controls Form (6 cols) */}
           <div className="lg:col-span-6 bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-5 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                 <Sliders className="w-4 h-4 text-blue-400" />
                 <span>Custom Paper Header & Font Settings</span>
@@ -388,8 +546,20 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
               <div className="flex items-center space-x-2">
                 <button
+                  type="button"
+                  onClick={handleSaveAsNew}
+                  className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium px-3 py-1.5 rounded-lg text-xs transition-colors"
+                  title="Save current details as a new template copy in IndexedDB"
+                >
+                  <Plus className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Save As New</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleSave}
                   className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg text-xs shadow-md transition-colors"
+                  title="Save changes to active template in IndexedDB permanently"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save Template</span>
@@ -399,9 +569,21 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
 
             {/* Form Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              {/* Template Name input */}
+              <div className="sm:col-span-2">
+                <label className="text-slate-400 block mb-1 font-medium">Template Display Title (Saved in Database)</label>
+                <input
+                  type="text"
+                  value={templateForm.name}
+                  onChange={e => setTemplateForm({ ...templateForm, name: e.target.value })}
+                  placeholder="e.g. Gradeup HP Home Guard Official Paper Format"
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2.5 focus:outline-none focus:border-blue-500 font-bold"
+                />
+              </div>
+
               {/* Preset Quick Loader */}
               <div className="sm:col-span-2">
-                <label className="text-slate-400 block mb-1 font-medium">Load Official Style Preset</label>
+                <label className="text-slate-400 block mb-1 font-medium">Load Official Format Preset</label>
                 <select
                   value={selectedStyleId}
                   onChange={e => {
@@ -434,7 +616,7 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1 font-medium">Examination Name</label>
+                <label className="text-slate-400 block mb-1 font-medium">Examination Name (Editable)</label>
                 <input
                   type="text"
                   value={templateForm.header.examName}
@@ -444,9 +626,11 @@ export const TemplatesView: React.FC<TemplatesViewProps> = ({
                       header: { ...templateForm.header, examName: e.target.value }
                     })
                   }
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-950 border border-slate-700 text-amber-300 font-bold rounded-lg p-2 focus:outline-none focus:border-blue-500"
+                  placeholder="e.g. HP Home Guard Exam 2026"
                 />
               </div>
+
 
               <div>
                 <label className="text-slate-400 block mb-1 font-medium">Test Subtitle / Paper Name</label>

@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import { Question, MockHistory, SectionConfig } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Question, MockHistory, SectionConfig, ExamPreset } from '../types';
 import { runIQSE, IQSEResult, IrtTargetProfile } from '../lib/iqse';
 import { getStoredAiConfig } from '../lib/aiClient';
-import { addMock } from '../lib/db';
+import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset } from '../lib/db';
 import { syncMockHistoryToSupabase } from '../lib/supabaseClient';
 import {
   Sparkles,
@@ -20,7 +20,14 @@ import {
   BarChart3,
   Shuffle,
   Zap,
-  Target
+  Target,
+  Bookmark,
+  Save,
+  BookmarkCheck,
+  Settings2,
+  BookOpen,
+  Edit3,
+  FileEdit
 } from 'lucide-react';
 
 interface MockCreatorViewProps {
@@ -48,7 +55,20 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
   const [semanticThreshold, setSemanticThreshold] = useState<number>(0.60); // 0.60 default
   const [irtProfile, setIrtProfile] = useState<IrtTargetProfile>('balanced');
 
-  // Available Subjects
+  // Exam Presets / Blueprints state
+  const [examPresets, setExamPresets] = useState<ExamPreset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
+  const [isSavePresetModalOpen, setIsSavePresetModalOpen] = useState<boolean>(false);
+  const [presetNameInput, setPresetNameInput] = useState<string>('');
+  const [examNameInput, setExamNameInput] = useState<string>('');
+  const [isManagePresetsOpen, setIsManagePresetsOpen] = useState<boolean>(false);
+
+  // Edit Blueprint Modal state
+  const [isEditPresetModalOpen, setIsEditPresetModalOpen] = useState<boolean>(false);
+  const [editingPreset, setEditingPreset] = useState<ExamPreset | null>(null);
+
+  // Available subjects from imported questions
   const availableSubjects = useMemo(() => {
     return Array.from(new Set(questions.map(q => q.subject))).filter((s): s is string => Boolean(s)).sort();
   }, [questions]);
@@ -68,6 +88,169 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
       chapterDistribution: {}
     }
   ]);
+
+  // Comprehensive list of all selectable subjects
+  const allSelectableSubjects = useMemo(() => {
+    const fromQuestions = questions.map(q => q.subject).filter(Boolean);
+    const fromPresets = examPresets.flatMap(p => p.sections?.map(s => s.subject) || []);
+    const fromCurrentSections = (sections || []).map(s => s.subject).filter(Boolean);
+    const defaults = [
+      'General Knowledge',
+      'Hindi Language',
+      'English Language',
+      'Quantitative Aptitude',
+      'Reasoning Ability',
+      'General Science',
+      'Computer Knowledge',
+      'Mathematics & Reasoning'
+    ];
+    return Array.from(new Set([...fromQuestions, ...fromPresets, ...fromCurrentSections, ...defaults])).sort();
+  }, [questions, examPresets, sections]);
+
+  // Load Exam Presets on mount
+  const loadPresets = async () => {
+    try {
+      const loaded = await getAllExamPresets();
+      setExamPresets(loaded);
+    } catch (e) {
+      console.error('Failed to load exam presets:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadPresets();
+  }, []);
+
+  const handleApplyPreset = (presetId: number | string) => {
+    if (!presetId) {
+      setSelectedPresetId('');
+      return;
+    }
+    const found = examPresets.find(p => p.id === Number(presetId));
+    if (!found) return;
+
+    setSelectedPresetId(String(found.id));
+    setTestName(`${found.examName} Mock Test - 01`);
+    setTotalMarks(found.totalMarks);
+    setDuration(found.duration);
+    if (found.excludeLastN !== undefined) setExcludeLastN(found.excludeLastN);
+    if (found.uniqueThreshold !== undefined) setUniqueThreshold(found.uniqueThreshold);
+    if (found.irtProfile) setIrtProfile(found.irtProfile as IrtTargetProfile);
+
+    // Deep clone sections so modifications don't mutate preset
+    if (found.sections && Array.isArray(found.sections) && found.sections.length > 0) {
+      const clonedSections: SectionConfig[] = found.sections.map((s, idx) => ({
+        id: `sec_${Date.now()}_${idx}`,
+        subject: s.subject || 'General Knowledge',
+        questionCount: Number(s.questionCount) || 10,
+        chapterDistribution: { ...(s.chapterDistribution || {}) }
+      }));
+      setSections(clonedSections);
+    } else {
+      setSections([
+        { id: 'sec_1', subject: 'General Knowledge', questionCount: 20, chapterDistribution: {} },
+        { id: 'sec_2', subject: 'Hindi Language', questionCount: 15, chapterDistribution: {} },
+        { id: 'sec_3', subject: 'English Language', questionCount: 15, chapterDistribution: {} }
+      ]);
+    }
+
+    setPresetNotice(`Applied Exam Preset "${found.presetName}"! All ${found.sections?.length || 0} sections loaded automatically.`);
+    setTimeout(() => setPresetNotice(null), 3500);
+  };
+
+  const handleOpenSavePresetModal = () => {
+    const defaultExam = testName.replace(/Mock Test.*$/i, '').trim() || 'Custom Exam';
+    setPresetNameInput(`${defaultExam} Blueprint`);
+    setExamNameInput(defaultExam);
+    setIsSavePresetModalOpen(true);
+  };
+
+  const handleSaveCurrentPreset = async () => {
+    if (!presetNameInput.trim() || !examNameInput.trim()) {
+      alert('Please enter both Preset Name and Exam Name.');
+      return;
+    }
+
+    const newPreset: ExamPreset = {
+      presetName: presetNameInput.trim(),
+      examName: examNameInput.trim(),
+      totalMarks,
+      duration,
+      sections: sections.map(s => ({
+        id: s.id,
+        subject: s.subject,
+        questionCount: s.questionCount,
+        chapterDistribution: { ...(s.chapterDistribution || {}) }
+      })),
+      excludeLastN,
+      uniqueThreshold,
+      irtProfile
+    };
+
+    const savedId = await saveExamPreset(newPreset);
+    await loadPresets();
+    setSelectedPresetId(String(savedId));
+    setIsSavePresetModalOpen(false);
+    setPresetNotice(`Exam Preset "${presetNameInput.trim()}" saved permanently! You will not need to re-add sections manually.`);
+    setTimeout(() => setPresetNotice(null), 4000);
+  };
+
+  const handleOpenEditPreset = (presetToEdit?: ExamPreset) => {
+    let target = presetToEdit;
+    if (!target && selectedPresetId) {
+      target = examPresets.find(p => String(p.id) === selectedPresetId);
+    }
+    if (!target) {
+      target = {
+        presetName: `${testName.replace(/Mock Test.*$/i, '').trim() || 'Custom'} Blueprint`,
+        examName: testName.replace(/Mock Test.*$/i, '').trim() || 'Custom Exam',
+        totalMarks,
+        duration,
+        sections: sections.map(s => ({ ...s })),
+        excludeLastN,
+        uniqueThreshold,
+        irtProfile
+      };
+    }
+
+    setEditingPreset(JSON.parse(JSON.stringify(target)));
+    setIsEditPresetModalOpen(true);
+  };
+
+  const handleSaveEditedPreset = async (asNew: boolean = false) => {
+    if (!editingPreset) return;
+    if (!editingPreset.presetName.trim() || !editingPreset.examName.trim()) {
+      alert('Please provide both Preset Display Title and Exam Name.');
+      return;
+    }
+    if (!editingPreset.sections || editingPreset.sections.length === 0) {
+      alert('Please add at least one section to the blueprint.');
+      return;
+    }
+
+    const toSave: ExamPreset = {
+      ...editingPreset,
+      id: asNew ? undefined : editingPreset.id
+    };
+
+    const savedId = await saveExamPreset(toSave);
+    await loadPresets();
+
+    // Automatically apply the saved preset to generator form
+    handleApplyPreset(toSave.id || savedId);
+
+    setIsEditPresetModalOpen(false);
+    setEditingPreset(null);
+    setPresetNotice(`Exam Blueprint "${toSave.presetName}" saved permanently with ${toSave.sections.length} sections!`);
+    setTimeout(() => setPresetNotice(null), 4000);
+  };
+
+  const handleDeletePreset = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this saved Exam Preset?')) return;
+    await deleteExamPreset(id);
+    await loadPresets();
+    if (selectedPresetId === String(id)) setSelectedPresetId('');
+  };
 
   // Active Chapter Distribution Modal Section
   const [activeChapterSecId, setActiveChapterSecId] = useState<string | null>(null);
@@ -253,7 +436,90 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
         </button>
       </div>
 
+      {/* Preset Notice Alert */}
+      {presetNotice && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center space-x-2 shadow-sm animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{presetNotice}</span>
+        </div>
+      )}
+
+      {/* Saved Exam Presets & Blueprints Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 p-4 rounded-2xl space-y-3 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-2">
+            <BookmarkCheck className="w-5 h-5 text-indigo-400 shrink-0" />
+            <div>
+              <h3 className="text-xs font-bold text-white flex items-center space-x-1.5">
+                <span>Saved Exam Templates & Section Blueprints</span>
+                <span className="text-[10px] bg-indigo-900/80 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-700">
+                  {examPresets.length} Saved
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Select an exam preset to load exam name, marks, duration, and section subjects automatically without manual entry!
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={handleOpenSavePresetModal}
+              className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3.5 py-1.5 rounded-lg text-xs shadow-sm transition-colors"
+              title="Save current exam parameters and section rules as a reusable preset"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Save Current Setup as Exam Preset</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsManagePresetsOpen(true)}
+              className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
+              title="Manage or delete saved exam presets"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              <span>Manage</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Preset Selector Dropdown */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center pt-1">
+          <label className="sm:col-span-3 text-xs text-slate-300 font-semibold flex items-center space-x-1.5">
+            <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+            <span>Load Exam Blueprint:</span>
+          </label>
+          <div className="sm:col-span-9 flex flex-col sm:flex-row items-center gap-2">
+            <select
+              value={selectedPresetId}
+              onChange={e => handleApplyPreset(e.target.value)}
+              className="flex-1 w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-2.5 text-xs focus:outline-none focus:border-indigo-500 font-medium"
+            >
+              <option value="">-- Choose Exam Preset (e.g. HP Home Guard, SSC CGL, HP Police) --</option>
+              {examPresets.map(preset => (
+                <option key={preset.id} value={preset.id}>
+                  📌 {preset.presetName} ({preset.examName}) - {preset.sections.length} Sections ({preset.sections.reduce((a, b) => a + b.questionCount, 0)} Qs, {preset.duration}m)
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => handleOpenEditPreset()}
+              className="w-full sm:w-auto flex items-center justify-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold px-3.5 py-2.5 rounded-xl text-xs shadow-sm transition-colors shrink-0"
+              title="Edit selected exam blueprint structure, title, duration, marks, or section rules"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{selectedPresetId ? 'Edit Blueprint' : 'Create Blueprint'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Settings Grid */}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Test Parameters Card */}
         <div className="md:col-span-2 bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4 shadow-sm">
@@ -452,20 +718,24 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
                     {index + 1}
                   </span>
 
-                  {/* Subject Dropdown */}
+                  {/* Subject Input with datalist */}
                   <div className="flex-1 max-w-xs">
-                    <label className="text-[10px] text-slate-500 block">Subject</label>
-                    <select
-                      value={sec.subject}
-                      onChange={e => updateSection(sec.id, 'subject', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg p-2 focus:outline-none focus:border-blue-500"
-                    >
-                      {availableSubjects.map(sub => (
-                        <option key={sub} value={sub}>
-                          {sub}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="text-[10px] text-slate-500 block mb-0.5 font-medium">Subject Name</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        list={`subject-datalist-${sec.id}`}
+                        value={sec.subject}
+                        onChange={e => updateSection(sec.id, 'subject', e.target.value)}
+                        placeholder="Select or type subject..."
+                        className="w-full bg-slate-900 border border-slate-700 text-white font-semibold text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-500"
+                      />
+                      <datalist id={`subject-datalist-${sec.id}`}>
+                        {allSelectableSubjects.map(sub => (
+                          <option key={sub} value={sub} />
+                        ))}
+                      </datalist>
+                    </div>
                   </div>
 
                   {/* Question Count Input */}
@@ -737,6 +1007,374 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: Save Current Exam Setup as Blueprint / Preset */}
+      {isSavePresetModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                <BookmarkCheck className="w-4 h-4 text-indigo-400" />
+                <span>Save Exam Preset / Blueprint</span>
+              </h3>
+              <button
+                onClick={() => setIsSavePresetModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Save these test parameters & sections ({sections.length} section(s), {sections.reduce((a, b) => a + b.questionCount, 0)} questions, {duration} mins) as a reusable exam template.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1 font-medium">Exam Name (Category)</label>
+                <input
+                  type="text"
+                  value={examNameInput}
+                  onChange={e => setExamNameInput(e.target.value)}
+                  placeholder="e.g. HP Home Guard, SSC CGL, HP Police Constable"
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2.5 focus:outline-none focus:border-indigo-500 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1 font-medium">Preset Display Title</label>
+                <input
+                  type="text"
+                  value={presetNameInput}
+                  onChange={e => setPresetNameInput(e.target.value)}
+                  placeholder="e.g. HP Home Guard Standard Blueprint"
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2.5 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-[11px] text-slate-400">
+                <div className="font-semibold text-slate-200">Included Sections:</div>
+                <ul className="list-disc list-inside space-y-0.5">
+                  {sections.map(s => (
+                    <li key={s.id}>
+                      <strong className="text-indigo-300">{s.subject}</strong>: {s.questionCount} Questions
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setIsSavePresetModalOpen(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-4 py-2 rounded-xl text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveCurrentPreset}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-5 py-2 rounded-xl text-xs shadow-md transition-colors flex items-center space-x-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Preset Permanently</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Manage Saved Exam Presets */}
+      {isManagePresetsOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                <Settings2 className="w-4 h-4 text-indigo-400" />
+                <span>Manage Saved Exam Presets ({examPresets.length})</span>
+              </h3>
+              <button
+                onClick={() => setIsManagePresetsOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-80 overflow-y-auto space-y-3 pr-1">
+              {examPresets.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-6">No saved exam presets found.</p>
+              ) : (
+                examPresets.map(preset => (
+                  <div
+                    key={preset.id}
+                    className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-white truncate">{preset.presetName}</span>
+                        <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded font-mono">
+                          {preset.examName}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {preset.sections.length} Sections ({preset.sections.map(s => `${s.subject}: ${s.questionCount}`).join(', ')}) • {preset.duration} mins • {preset.totalMarks} marks
+                      </p>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <button
+                        onClick={() => {
+                          handleApplyPreset(preset.id!);
+                          setIsManagePresetsOpen(false);
+                        }}
+                        className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg text-xs"
+                      >
+                        Load
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsManagePresetsOpen(false);
+                          handleOpenEditPreset(preset);
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1"
+                        title="Edit Blueprint Details & Sections"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeletePreset(preset.id!)}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800"
+                        title="Delete Preset"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setIsManagePresetsOpen(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-5 py-2 rounded-xl text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Exam Blueprint / Preset Structure */}
+      {isEditPresetModalOpen && editingPreset && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-6 space-y-5 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <Edit3 className="w-5 h-5 text-blue-400" />
+                <span>Edit Exam Blueprint & Section Structure</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setIsEditPresetModalOpen(false);
+                  setEditingPreset(null);
+                }}
+                className="text-slate-400 hover:text-white font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Modify the exam parameters, titles, and section-by-section subject rule distribution for this blueprint. Changes will be saved permanently in IndexedDB.
+            </p>
+
+            <div className="space-y-4 text-xs">
+              {/* Preset Name & Exam Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1 font-semibold">Preset Display Title</label>
+                  <input
+                    type="text"
+                    value={editingPreset.presetName}
+                    onChange={e => setEditingPreset({ ...editingPreset, presetName: e.target.value })}
+                    placeholder="e.g. HP Home Guard Official Blueprint"
+                    className="w-full bg-slate-950 border border-slate-700 text-white font-bold rounded-xl p-2.5 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1 font-semibold">Exam Name (Category)</label>
+                  <input
+                    type="text"
+                    value={editingPreset.examName}
+                    onChange={e => setEditingPreset({ ...editingPreset, examName: e.target.value })}
+                    placeholder="e.g. HP Home Guard Exam 2026"
+                    className="w-full bg-slate-950 border border-slate-700 text-amber-300 font-bold rounded-xl p-2.5 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1 font-semibold">Total Maximum Marks</label>
+                  <input
+                    type="number"
+                    value={editingPreset.totalMarks}
+                    onChange={e => setEditingPreset({ ...editingPreset, totalMarks: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-2 focus:outline-none focus:border-blue-500 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1 font-semibold">Duration (Minutes)</label>
+                  <input
+                    type="number"
+                    value={editingPreset.duration}
+                    onChange={e => setEditingPreset({ ...editingPreset, duration: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-2 focus:outline-none focus:border-blue-500 font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Section Structure Editor */}
+              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center space-x-2">
+                    <Layers className="w-4 h-4 text-indigo-400" />
+                    <span className="font-bold text-white">Blueprint Sections & Subject Rules ({editingPreset.sections?.length || 0})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newSec: SectionConfig = {
+                        id: `sec_edit_${Date.now()}`,
+                        subject: allSelectableSubjects[0] || 'General Knowledge',
+                        questionCount: 15,
+                        chapterDistribution: {}
+                      };
+                      setEditingPreset({
+                        ...editingPreset,
+                        sections: [...(editingPreset.sections || []), newSec]
+                      });
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1 shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Section</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                  {(editingPreset.sections || []).map((sec, idx) => (
+                    <div
+                      key={sec.id || idx}
+                      className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center space-x-2 flex-1">
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-blue-400 border border-slate-700 text-[10px] font-bold flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+
+                        <div className="flex-1">
+                          <label className="text-[10px] text-slate-400 block mb-0.5 font-medium">Subject Name</label>
+                          <input
+                            type="text"
+                            list={`modal-subject-list-${idx}`}
+                            value={sec.subject}
+                            onChange={e => {
+                              const updated = [...editingPreset.sections];
+                              updated[idx] = { ...updated[idx], subject: e.target.value };
+                              setEditingPreset({ ...editingPreset, sections: updated });
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 text-white font-semibold rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. General Knowledge"
+                          />
+                          <datalist id={`modal-subject-list-${idx}`}>
+                            {allSelectableSubjects.map(sub => (
+                              <option key={sub} value={sub} />
+                            ))}
+                          </datalist>
+                        </div>
+
+                        <div className="w-24 shrink-0">
+                          <label className="text-[10px] text-slate-400 block mb-0.5 font-medium">Question Count</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={sec.questionCount}
+                            onChange={e => {
+                              const updated = [...editingPreset.sections];
+                              updated[idx] = { ...updated[idx], questionCount: Number(e.target.value) };
+                              setEditingPreset({ ...editingPreset, sections: updated });
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 text-amber-300 font-bold rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      {editingPreset.sections.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = editingPreset.sections.filter((_, i) => i !== idx);
+                            setEditingPreset({ ...editingPreset, sections: updated });
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                          title="Delete section from blueprint"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[11px] text-slate-400 font-medium flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span>Total Blueprint Questions:</span>
+                  <strong className="text-emerald-400 text-xs font-bold">
+                    {(editingPreset.sections || []).reduce((a, b) => a + (Number(b.questionCount) || 0), 0)} Questions
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditPresetModalOpen(false);
+                  setEditingPreset(null);
+                }}
+                className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2 rounded-xl text-xs"
+              >
+                Cancel
+              </button>
+
+              <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleSaveEditedPreset(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium px-4 py-2 rounded-xl text-xs transition-colors"
+                  title="Save as a brand new blueprint copy"
+                >
+                  Save as New Blueprint
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveEditedPreset(false)}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-5 py-2 rounded-xl text-xs shadow-md transition-colors flex items-center space-x-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Blueprint Changes</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

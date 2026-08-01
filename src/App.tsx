@@ -37,6 +37,7 @@ import {
   deleteMock,
   getAllTemplates,
   saveTemplate,
+  deleteTemplate,
   DEFAULT_TEMPLATE
 } from './lib/db';
 
@@ -236,6 +237,11 @@ export function App() {
     await loadDatabaseData();
   };
 
+  const handleDeleteTemplate = async (id: number) => {
+    await deleteTemplate(id);
+    await loadDatabaseData();
+  };
+
   if (isDbLoading) {
     return (
       <div className="min-h-screen bg-[#0d1233] text-white flex items-center justify-center p-4 font-sans">
@@ -332,6 +338,7 @@ export function App() {
               duration={activeTestDuration}
               uniquenessScore={activeUniquenessScore}
               allBankQuestions={questions}
+              mockHistory={mockHistory}
               onUpdateTestQuestions={async (qs) => {
                 setActiveTestQuestions(qs);
                 const questionsWithId = qs.filter(q => q.id !== undefined);
@@ -349,6 +356,7 @@ export function App() {
               templates={templates}
               onSaveTemplate={handleSaveTemplate}
               onSetDefaultTemplate={t => setCurrentTemplate(t)}
+              onDeleteTemplate={handleDeleteTemplate}
             />
           )}
 
