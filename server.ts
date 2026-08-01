@@ -751,6 +751,100 @@ function cleanPurnaViramForMathReasoningServer(text: string, subject?: string, c
   return text;
 }
 
+// Translation helpers for Tavily Dual Language explanation generation
+async function translateTextToHindiServer(text: string): Promise<string> {
+  if (!text || !text.trim()) return "";
+  const clean = text.trim();
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&q=${encodeURIComponent(clean)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const segments = data[0].map((item: any) => item[0]).filter(Boolean);
+        if (segments.length > 0) {
+          return segments.join("").trim();
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[translateTextToHindiServer] Warning:", err.message);
+  }
+  return "";
+}
+
+async function translateTextToEnglishServer(text: string): Promise<string> {
+  if (!text || !text.trim()) return "";
+  const clean = text.trim();
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=hi&tl=en&dt=t&q=${encodeURIComponent(clean)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const segments = data[0].map((item: any) => item[0]).filter(Boolean);
+        if (segments.length > 0) {
+          return segments.join("").trim();
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[translateTextToEnglishServer] Warning:", err.message);
+  }
+  return "";
+}
+
+async function ensureDualLanguageExplanationServer(rawExp: string, subject?: string, chapter?: string): Promise<string> {
+  if (!rawExp || !rawExp.trim()) return "";
+  const trimmed = rawExp.trim();
+
+  const isLang = isLangSubject(subject, chapter);
+
+  // If it's a language-specific subject (e.g. English Grammar, Hindi Vyakaran, Literature), DO NOT force dual language
+  if (isLang) {
+    const subLower = ((subject || "") + " " + (chapter || "")).toLowerCase();
+    const isHindiLang = subLower.includes("hindi") || subLower.includes("हिन्दी") || /व्याकरण|साहित्य|गद्यांश|पद्यांश/i.test(subLower);
+    
+    // If it's a Hindi language subject but explanation is in English, translate to Hindi
+    if (isHindiLang && !/[\u0900-\u097F]/.test(trimmed)) {
+      const hiTrans = await translateTextToHindiServer(trimmed);
+      return hiTrans || trimmed;
+    }
+    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+  }
+
+  // FOR ALL OTHER SECTIONS & SUBJECTS: MUST BE DUAL LANGUAGE (English & Hindi)
+  const hasEnglish = /[a-zA-Z]/.test(trimmed);
+  const hasHindi = /[\u0900-\u097F]/.test(trimmed);
+
+  // If it already has both English and Hindi text, just clean math purna viram
+  if (hasEnglish && hasHindi) {
+    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+  }
+
+  // If it is English only (typical Tavily response), translate to Hindi & combine
+  if (hasEnglish && !hasHindi) {
+    let hindiTranslation = await translateTextToHindiServer(trimmed);
+    if (hindiTranslation) {
+      hindiTranslation = cleanPurnaViramForMathReasoningServer(hindiTranslation, subject, chapter);
+      return `English: ${trimmed}\n\nहिंदी: ${hindiTranslation}`;
+    }
+    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+  }
+
+  // If it is Hindi only, translate to English & combine
+  if (hasHindi && !hasEnglish) {
+    let englishTranslation = await translateTextToEnglishServer(trimmed);
+    const cleanedHindi = cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+    if (englishTranslation) {
+      return `English: ${englishTranslation}\n\nहिंदी: ${cleanedHindi}`;
+    }
+    return cleanedHindi;
+  }
+
+  return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+}
+
 // Dedicated Tavily Explanation Generator Engine
 async function callTavilyExplain(apiKey: string, questions: any[]): Promise<any[]> {
   const cleanKey = apiKey?.trim().replace(/^["']|["']$/g, "") || "";
@@ -816,10 +910,12 @@ Instruction: ${langInstruction}`;
         throw new Error("Tavily search returned no valid explanation text.");
       }
 
+      const finalFormatted = await ensureDualLanguageExplanationServer(explanationText, q.subject, q.chapter);
+
       explanations.push({
         index: i,
         idTemp: q.idTemp || q.id || i,
-        explanation: cleanPurnaViramForMathReasoningServer(explanationText, q.subject, q.chapter)
+        explanation: finalFormatted
       });
     } catch (err: any) {
       console.warn(`[Tavily Explain Warning] Question ${i + 1} search failed:`, err.message);

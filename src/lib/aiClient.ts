@@ -885,6 +885,104 @@ export function isLangSubjectClient(subject?: string, chapter?: string): boolean
 
 export type QuestionInput = Partial<Question> & { index?: number; idTemp?: number };
 
+// Translation helpers for Tavily Dual Language explanation generation
+export async function translateTextToHindi(text: string): Promise<string> {
+  if (!text || !text.trim()) return '';
+  const clean = text.trim();
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&q=${encodeURIComponent(clean)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const segments = data[0].map((item: any) => item[0]).filter(Boolean);
+        if (segments.length > 0) {
+          return segments.join('').trim();
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[translateTextToHindi] Warning:', err.message);
+  }
+  return '';
+}
+
+export async function translateTextToEnglish(text: string): Promise<string> {
+  if (!text || !text.trim()) return '';
+  const clean = text.trim();
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=hi&tl=en&dt=t&q=${encodeURIComponent(clean)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const segments = data[0].map((item: any) => item[0]).filter(Boolean);
+        if (segments.length > 0) {
+          return segments.join('').trim();
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[translateTextToEnglish] Warning:', err.message);
+  }
+  return '';
+}
+
+export async function formatDualLanguageExplanation(
+  rawExp: string,
+  subject?: string,
+  chapter?: string
+): Promise<string> {
+  if (!rawExp || !rawExp.trim()) return '';
+  const trimmed = rawExp.trim();
+
+  const isLang = isLanguageGrammarVocabQuestion({ subject, chapter });
+
+  // If it's a language-specific subject (e.g. English Grammar, Hindi Vyakaran, Literature), DO NOT force dual language
+  if (isLang) {
+    const subLower = ((subject || '') + ' ' + (chapter || '')).toLowerCase();
+    const isHindiLang = subLower.includes('hindi') || subLower.includes('हिन्दी') || /व्याकरण|साहित्य|गद्यांश|पद्यांश/i.test(subLower);
+    
+    // If it's a Hindi language subject but explanation is in English, translate to Hindi
+    if (isHindiLang && !/[\u0900-\u097F]/.test(trimmed)) {
+      const hiTrans = await translateTextToHindi(trimmed);
+      return hiTrans || trimmed;
+    }
+    return cleanPurnaViramForMathReasoning(trimmed, subject, chapter);
+  }
+
+  // FOR ALL OTHER SECTIONS & SUBJECTS: MUST BE DUAL LANGUAGE (English & Hindi)
+  const hasEnglish = /[a-zA-Z]/.test(trimmed);
+  const hasHindi = /[\u0900-\u097F]/.test(trimmed);
+
+  // If it already has both English and Hindi text, just clean math purna viram
+  if (hasEnglish && hasHindi) {
+    return cleanPurnaViramForMathReasoning(trimmed, subject, chapter);
+  }
+
+  // If it is English only (typical Tavily response), translate to Hindi & combine
+  if (hasEnglish && !hasHindi) {
+    let hindiTranslation = await translateTextToHindi(trimmed);
+    if (hindiTranslation) {
+      hindiTranslation = cleanPurnaViramForMathReasoning(hindiTranslation, subject, chapter);
+      return `English: ${trimmed}\n\nहिंदी: ${hindiTranslation}`;
+    }
+    return cleanPurnaViramForMathReasoning(trimmed, subject, chapter);
+  }
+
+  // If it is Hindi only, translate to English & combine
+  if (hasHindi && !hasEnglish) {
+    let englishTranslation = await translateTextToEnglish(trimmed);
+    const cleanedHindi = cleanPurnaViramForMathReasoning(trimmed, subject, chapter);
+    if (englishTranslation) {
+      return `English: ${englishTranslation}\n\nहिंदी: ${cleanedHindi}`;
+    }
+    return cleanedHindi;
+  }
+
+  return cleanPurnaViramForMathReasoning(trimmed, subject, chapter);
+}
+
 // Dedicated Client Tavily Search API Explanation Generator
 export async function callTavilyExplainClient(
   apiKey: string,
@@ -953,10 +1051,12 @@ Instruction: ${langInstruction}`;
         throw new Error('Tavily search returned no valid explanation text.');
       }
 
+      const finalFormatted = await formatDualLanguageExplanation(explanationText, q.subject, q.chapter);
+
       explanations.push({
         index: i,
         idTemp: (q as any).idTemp || q.id || i,
-        explanation: cleanPurnaViramForMathReasoning(explanationText, q.subject, q.chapter)
+        explanation: finalFormatted
       });
     } catch (err: any) {
       console.warn(`[Tavily Explain Client] Question ${i + 1} warning:`, err.message);
@@ -1004,26 +1104,35 @@ export async function callAiExplain(
       });
 
       if (serverResult.ok && serverResult.data?.success && Array.isArray(serverResult.data.explanations) && serverResult.data.explanations.length > 0) {
-        return serverResult.data.explanations.map((item: any, idx: number) => {
-          let expText = item.explanation;
-          if (typeof expText === 'object' && expText !== null) {
-            expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
-          }
-          const rawExp = typeof expText === 'string' ? expText : String(expText || '');
-          const qObj = questions[idx] || {};
-          return {
-            index: item.index !== undefined ? item.index : idx,
-            idTemp: item.idTemp || item.id,
-            explanation: cleanPurnaViramForMathReasoning(rawExp, qObj.subject, qObj.chapter)
-          };
-        });
+        return Promise.all(
+          serverResult.data.explanations.map(async (item: any, idx: number) => {
+            let expText = item.explanation;
+            if (typeof expText === 'object' && expText !== null) {
+              expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
+            }
+            const rawExp = typeof expText === 'string' ? expText : String(expText || '');
+            const qObj = questions[idx] || {};
+            const formatted = await formatDualLanguageExplanation(rawExp, qObj.subject, qObj.chapter);
+            return {
+              index: item.index !== undefined ? item.index : idx,
+              idTemp: item.idTemp || item.id,
+              explanation: formatted
+            };
+          })
+        );
       }
 
       // B. If server failed or offline, execute Tavily directly on client
       if (tavilyKey) {
         const clientTav = await callTavilyExplainClient(tavilyKey, questions);
         if (clientTav && clientTav.length > 0) {
-          return clientTav;
+          return Promise.all(
+            clientTav.map(async (item, idx) => {
+              const qObj = questions[idx] || {};
+              const formatted = await formatDualLanguageExplanation(item.explanation, qObj.subject, qObj.chapter);
+              return { ...item, explanation: formatted };
+            })
+          );
         }
       }
     } catch (tavErr: any) {
@@ -1049,19 +1158,22 @@ export async function callAiExplain(
   });
 
   if (serverResult.ok && serverResult.data?.success && Array.isArray(serverResult.data.explanations) && serverResult.data.explanations.length > 0) {
-    return serverResult.data.explanations.map((item: any, idx: number) => {
-      let expText = item.explanation;
-      if (typeof expText === 'object' && expText !== null) {
-        expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
-      }
-      const rawExp = typeof expText === 'string' ? expText : String(expText || '');
-      const qObj = questions[idx] || {};
-      return {
-        index: item.index !== undefined ? item.index : idx,
-        idTemp: item.idTemp || item.id,
-        explanation: cleanPurnaViramForMathReasoning(rawExp, qObj.subject, qObj.chapter)
-      };
-    });
+    return Promise.all(
+      serverResult.data.explanations.map(async (item: any, idx: number) => {
+        let expText = item.explanation;
+        if (typeof expText === 'object' && expText !== null) {
+          expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
+        }
+        const rawExp = typeof expText === 'string' ? expText : String(expText || '');
+        const qObj = questions[idx] || {};
+        const formatted = await formatDualLanguageExplanation(rawExp, qObj.subject, qObj.chapter);
+        return {
+          index: item.index !== undefined ? item.index : idx,
+          idTemp: item.idTemp || item.id,
+          explanation: formatted
+        };
+      })
+    );
   }
 
   // 3. Client Direct Failover (If Gemini / Groq Quota is Exhausted)
@@ -1070,7 +1182,13 @@ export async function callAiExplain(
       console.log('[callAiExplain Client Failover] Gemini/Groq server failed or exhausted quota. Calling Tavily Engine...');
       const clientTav = await callTavilyExplainClient(tavilyKey, questions);
       if (clientTav && clientTav.length > 0) {
-        return clientTav;
+        return Promise.all(
+          clientTav.map(async (item, idx) => {
+            const qObj = questions[idx] || {};
+            const formatted = await formatDualLanguageExplanation(item.explanation, qObj.subject, qObj.chapter);
+            return { ...item, explanation: formatted };
+          })
+        );
       }
     } catch (tavClientErr: any) {
       console.warn('[callAiExplain Client Failover] Tavily client call warning:', tavClientErr.message);
@@ -1127,19 +1245,22 @@ ${JSON.stringify(formattedQuestions, null, 2)}`;
   const parsed = cleanAndParseJson(rawText);
 
   const list = Array.isArray(parsed) ? parsed : (parsed.explanations || parsed.items || []);
-  return list.map((item: any, idx: number) => {
-    let expText = item.explanation;
-    if (typeof expText === 'object' && expText !== null) {
-      expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
-    }
-    const rawExp = typeof expText === 'string' ? expText : String(expText || 'Option is correct as per standard reference syllabus.');
-    const qObj = questions[idx] || {};
-    return {
-      index: item.index !== undefined ? item.index : idx,
-      idTemp: item.idTemp,
-      explanation: cleanPurnaViramForMathReasoning(rawExp, qObj.subject, qObj.chapter)
-    };
-  });
+  return Promise.all(
+    list.map(async (item: any, idx: number) => {
+      let expText = item.explanation;
+      if (typeof expText === 'object' && expText !== null) {
+        expText = expText.text || expText.explanation || expText.hindi || expText.english || JSON.stringify(expText);
+      }
+      const rawExp = typeof expText === 'string' ? expText : String(expText || 'Option is correct as per standard reference syllabus.');
+      const qObj = questions[idx] || {};
+      const formatted = await formatDualLanguageExplanation(rawExp, qObj.subject, qObj.chapter);
+      return {
+        index: item.index !== undefined ? item.index : idx,
+        idTemp: item.idTemp,
+        explanation: formatted
+      };
+    })
+  );
 }
 
 // 3. Generate Questions
