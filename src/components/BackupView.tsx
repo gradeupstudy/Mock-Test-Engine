@@ -15,9 +15,10 @@ import {
   Archive,
   Zap
 } from 'lucide-react';
-import { SupabaseStorageModal } from './SupabaseStorageModal';
+import { CloudflareR2Modal } from './CloudflareR2Modal';
 import { PinModal } from './PinModal';
-import { getStoredSupabaseConfig, compressJsonToGzip, decompressGzipToJson } from '../lib/supabaseClient';
+import { getStoredR2Config } from '../lib/r2Client';
+import { compressJsonToGzip, decompressGzipToJson } from '../lib/supabaseClient';
 
 interface BackupViewProps {
   questions: Question[];
@@ -37,8 +38,8 @@ export const BackupView: React.FC<BackupViewProps> = ({
   const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
 
-  const supabaseConfig = getStoredSupabaseConfig();
-  const isSupabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
+  const r2Config = getStoredR2Config();
+  const isR2Configured = Boolean(r2Config.accountId && r2Config.accessKeyId && r2Config.secretAccessKey);
 
   const handleExportJson = (compressed: boolean = false) => {
     const backupData = {
@@ -186,7 +187,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
           <span>Backup & Restore Question Bank</span>
         </h2>
         <p className="text-xs text-slate-400 mt-1">
-          Export your entire IndexedDB question bank and mock history as a portable JSON or compressed Gzip file, or sync directly with Supabase Storage Buckets.
+          Export your entire IndexedDB question bank and mock history as a portable JSON or compressed Gzip file, or sync directly with Cloudflare R2 Storage Buckets.
         </p>
       </div>
 
@@ -199,37 +200,37 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Supabase Storage Cloud Backup Card */}
+        {/* Cloudflare R2 Storage Cloud Backup Card */}
         <div className="bg-[#111740] border border-[#232f7a] p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                <FolderSync className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center">
+                <Cloud className="w-5 h-5" />
               </div>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                isSupabaseConfigured
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                isR2Configured
+                  ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
                   : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
               }`}>
-                {isSupabaseConfigured ? 'Bucket Connected' : 'Not Linked'}
+                {isR2Configured ? 'R2 Connected' : 'Not Linked'}
               </span>
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <span>Supabase File Bucket Storage</span>
+                <span>Cloudflare R2 Object Storage</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Store & restore compressed Gzip backup files (.json.gz) in Supabase Storage Buckets with automatic decompression.
+                Store & restore compressed Gzip backup files (.json.gz) in Cloudflare R2 Buckets with 0 egress fees.
               </p>
             </div>
           </div>
 
           <button
             onClick={() => setIsStorageModalOpen(true)}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
+            className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center justify-center space-x-2"
           >
-            <Database className="w-4 h-4" />
-            <span>{isSupabaseConfigured ? 'Manage Supabase Bucket Storage' : 'Link Supabase Bucket'}</span>
+            <Cloud className="w-4 h-4" />
+            <span>{isR2Configured ? 'Manage Cloudflare R2 Storage' : 'Link Cloudflare R2 Storage'}</span>
           </button>
         </div>
 
@@ -350,7 +351,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
         </div>
       )}
 
-      <SupabaseStorageModal
+      <CloudflareR2Modal
         isOpen={isStorageModalOpen}
         onClose={() => setIsStorageModalOpen(false)}
         questions={questions}

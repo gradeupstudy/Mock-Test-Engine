@@ -949,8 +949,8 @@ Instruction: ${langInstruction}`;
         explanationText = data.results.map((r: any) => r.content).filter(Boolean).join('\n\n').slice(0, 800);
       }
 
-      if (!explanationText) {
-        explanationText = `Option ${ansLetter} is correct according to standard concepts.`;
+      if (!explanationText || explanationText.trim().length < 15) {
+        throw new Error('Tavily search returned no valid explanation text.');
       }
 
       explanations.push({
@@ -960,12 +960,11 @@ Instruction: ${langInstruction}`;
       });
     } catch (err: any) {
       console.warn(`[Tavily Explain Client] Question ${i + 1} warning:`, err.message);
-      explanations.push({
-        index: i,
-        idTemp: (q as any).idTemp || q.id || i,
-        explanation: cleanPurnaViramForMathReasoning(`Option ${ansLetter} is the correct answer according to standard concepts.`, q.subject, q.chapter)
-      });
     }
+  }
+
+  if (explanations.length === 0) {
+    throw new Error('Tavily Search API failed to generate explanations on client.');
   }
 
   return explanations;

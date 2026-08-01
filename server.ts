@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { S3Client, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 
 dotenv.config();
 
@@ -811,8 +812,8 @@ Instruction: ${langInstruction}`;
         explanationText = data.results.map((r: any) => r.content).filter(Boolean).join("\n").slice(0, 600);
       }
 
-      if (!explanationText) {
-        explanationText = `Option ${ansLetter} is correct according to standard guidelines.`;
+      if (!explanationText || explanationText.trim().length < 15) {
+        throw new Error("Tavily search returned no valid explanation text.");
       }
 
       explanations.push({
@@ -821,13 +822,12 @@ Instruction: ${langInstruction}`;
         explanation: cleanPurnaViramForMathReasoningServer(explanationText, q.subject, q.chapter)
       });
     } catch (err: any) {
-      console.warn(`[Tavily Explain Fallback] Question ${i + 1} failed:`, err.message);
-      explanations.push({
-        index: i,
-        idTemp: q.idTemp || q.id || i,
-        explanation: cleanPurnaViramForMathReasoningServer(`Option ${ansLetter} is the correct answer according to standard concepts.`, q.subject, q.chapter)
-      });
+      console.warn(`[Tavily Explain Warning] Question ${i + 1} search failed:`, err.message);
     }
+  }
+
+  if (explanations.length === 0) {
+    throw new Error("Tavily Search API failed to produce valid explanations for questions.");
   }
 
   return explanations;
@@ -1939,6 +1939,174 @@ Return response strictly as a JSON object with a "questions" key containing arra
   }
 
   return res.json({ success: false, error: "AI could not extract any questions from the provided text." });
+});
+
+// Helper to create Cloudflare R2 S3 Client
+function getR2S3Client(accountId: string, accessKeyId: string, secretAccessKey: string, customEndpoint?: string) {
+  const cleanAccountId = (accountId || "").trim();
+  const endpoint = customEndpoint && customEndpoint.trim()
+    ? customEndpoint.trim()
+    : `https://${cleanAccountId}.r2.cloudflarestorage.com`;
+  return new S3Client({
+    region: "auto",
+    endpoint,
+    credentials: {
+      accessKeyId: (accessKeyId || "").trim(),
+      secretAccessKey: (secretAccessKey || "").trim()
+    }
+  });
+}
+
+// Cloudflare R2 Connection Test Endpoint
+app.post("/api/r2/test", async (req, res) => {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, customDomain } = req.body;
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    return res.status(400).json({ success: false, error: "Account ID, Access Key ID, and Secret Access Key are required." });
+  }
+
+  const targetBucket = (bucketName || "backups").trim();
+
+  try {
+    const s3 = getR2S3Client(accountId, accessKeyId, secretAccessKey, customDomain);
+    // Test bucket existence or list objects
+    const command = new ListObjectsV2Command({ Bucket: targetBucket, MaxKeys: 1 });
+    await s3.send(command);
+    return res.json({
+      success: true,
+      message: `Successfully connected to Cloudflare R2 Bucket "${targetBucket}"!`
+    });
+  } catch (error: any) {
+    console.warn("Cloudflare R2 Test Error:", error.message);
+    let msg = error.message || String(error);
+    if (msg.includes("NoSuchBucket") || msg.includes("The specified bucket does not exist")) {
+      msg = `Bucket "${targetBucket}" does not exist in your Cloudflare R2 account. Please create the bucket in Cloudflare dashboard or check spelling.`;
+    } else if (msg.includes("AccessDenied") || msg.includes("InvalidAccessKeyId") || msg.includes("SignatureDoesNotMatch")) {
+      msg = `Authentication Failed: Invalid Access Key ID or Secret Access Key. Please check R2 API token permissions.`;
+    }
+    return res.status(400).json({ success: false, error: msg });
+  }
+});
+
+// Cloudflare R2 List Objects Endpoint
+app.post("/api/r2/list", async (req, res) => {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, customDomain } = req.body;
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    return res.status(400).json({ success: false, error: "Cloudflare R2 credentials missing." });
+  }
+
+  const targetBucket = (bucketName || "backups").trim();
+
+  try {
+    const s3 = getR2S3Client(accountId, accessKeyId, secretAccessKey, customDomain);
+    const command = new ListObjectsV2Command({ Bucket: targetBucket });
+    const response = await s3.send(command);
+
+    const files = (response.Contents || []).map(item => ({
+      key: item.Key || "",
+      name: item.Key || "",
+      size: item.Size || 0,
+      lastModified: item.LastModified ? item.LastModified.toISOString() : undefined,
+      etag: item.ETag
+    }));
+
+    // Sort descending by last modified date
+    files.sort((a, b) => {
+      const timeA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+      const timeB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    return res.json({ success: true, files });
+  } catch (error: any) {
+    console.warn("Cloudflare R2 List Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message || "Failed to list R2 bucket files." });
+  }
+});
+
+// Cloudflare R2 Upload Object Endpoint
+app.post("/api/r2/upload", async (req, res) => {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, customDomain, fileName, fileContentBase64, contentType } = req.body;
+  if (!accountId || !accessKeyId || !secretAccessKey || !fileName || !fileContentBase64) {
+    return res.status(400).json({ success: false, error: "Missing required parameters for upload." });
+  }
+
+  const targetBucket = (bucketName || "backups").trim();
+
+  try {
+    const buffer = Buffer.from(fileContentBase64, "base64");
+    const s3 = getR2S3Client(accountId, accessKeyId, secretAccessKey, customDomain);
+
+    const command = new PutObjectCommand({
+      Bucket: targetBucket,
+      Key: fileName,
+      Body: buffer,
+      ContentType: contentType || (fileName.endsWith(".gz") ? "application/gzip" : "application/json")
+    });
+
+    await s3.send(command);
+    return res.json({ success: true, fileName, size: buffer.length });
+  } catch (error: any) {
+    console.warn("Cloudflare R2 Upload Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message || "Failed to upload file to Cloudflare R2." });
+  }
+});
+
+// Cloudflare R2 Download Object Endpoint
+app.post("/api/r2/download", async (req, res) => {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, customDomain, fileName } = req.body;
+  if (!accountId || !accessKeyId || !secretAccessKey || !fileName) {
+    return res.status(400).json({ success: false, error: "Missing required parameters for download." });
+  }
+
+  const targetBucket = (bucketName || "backups").trim();
+
+  try {
+    const s3 = getR2S3Client(accountId, accessKeyId, secretAccessKey, customDomain);
+    const command = new GetObjectCommand({
+      Bucket: targetBucket,
+      Key: fileName
+    });
+
+    const response = await s3.send(command);
+    if (!response.Body) {
+      return res.status(404).json({ success: false, error: "File content empty." });
+    }
+
+    // Convert readable stream to Buffer
+    const byteArray = await response.Body.transformToByteArray();
+    const buffer = Buffer.from(byteArray);
+
+    res.setHeader("Content-Type", response.ContentType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  } catch (error: any) {
+    console.warn("Cloudflare R2 Download Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message || "Failed to download file from Cloudflare R2." });
+  }
+});
+
+// Cloudflare R2 Delete Object Endpoint
+app.post("/api/r2/delete", async (req, res) => {
+  const { accountId, accessKeyId, secretAccessKey, bucketName, customDomain, fileName } = req.body;
+  if (!accountId || !accessKeyId || !secretAccessKey || !fileName) {
+    return res.status(400).json({ success: false, error: "Missing required parameters for deletion." });
+  }
+
+  const targetBucket = (bucketName || "backups").trim();
+
+  try {
+    const s3 = getR2S3Client(accountId, accessKeyId, secretAccessKey, customDomain);
+    const command = new DeleteObjectCommand({
+      Bucket: targetBucket,
+      Key: fileName
+    });
+
+    await s3.send(command);
+    return res.json({ success: true, message: `File "${fileName}" deleted from Cloudflare R2.` });
+  } catch (error: any) {
+    console.warn("Cloudflare R2 Delete Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message || "Failed to delete file from Cloudflare R2." });
+  }
 });
 
 async function startServer() {
