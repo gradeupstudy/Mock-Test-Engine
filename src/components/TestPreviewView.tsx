@@ -38,6 +38,19 @@ import {
   ChevronRight
 } from 'lucide-react';
 
+// Helper: Extract Exam Category Name from Test Title (e.g. "HP Home Guard Mock Test - 24" -> "HP Home Guard")
+export function extractExamCategory(title: string): string {
+  if (!title) return 'General Exam';
+  let t = title.trim();
+  // Remove trailing numbers or series indicators, e.g. "- 24", "#24", "01", "24"
+  t = t.replace(/(?:[-#:]\s*|\s+)\d+\s*$/i, '');
+  // Remove common mock test suffixes
+  t = t.replace(/\s*\b(Mock\s*Test|Mock\s*Paper|Mock|Test\s*Paper|Practice\s*Set|Test|Set|Paper|Series)\b.*$/i, '');
+  // Remove trailing dashes/colons/whitespace
+  t = t.replace(/[-#:]+$/, '').trim();
+  return t || title.trim();
+}
+
 interface TestPreviewViewProps {
   testQuestions: Question[];
   testName: string;
@@ -89,53 +102,130 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   // MCQs Inspection Suite Modal State
   const [isInspectionModalOpen, setIsInspectionModalOpen] = useState<boolean>(false);
 
+  const currentExamCategory = useMemo(() => extractExamCategory(testName), [testName]);
+
   // Helper: Calculate question uniqueness details and past mock paper matches
   const getQuestionUniquenessDetails = (q: Question) => {
-    const usage = q.usageCount || 0;
+    // Exclude the current active mock test paper currently being created/previewed
+    const pastMocks = (mockHistory || []).filter(m => {
+      if (!testName) return true;
+      const mName = (m.testName || '').trim().toLowerCase();
+      const currentName = testName.trim().toLowerCase();
+      // Exclude exact match of current test name
+      if (mName === currentName) return false;
+      return true;
+    });
 
-    const matchedMocks = (mockHistory || []).filter(m => {
+    const matchedMocks = pastMocks.filter(m => {
       if (q.id !== undefined && m.questionIds && m.questionIds.includes(q.id)) {
         return true;
       }
       return false;
     });
 
-    const mockNames = Array.from(new Set(matchedMocks.map(m => m.testName || `Mock Test #${m.mockId || m.id}`)));
+    // Group matched past mocks into Same Exam vs Other Exams
+    const sameExamMocks: MockHistory[] = [];
+    const otherExamMocks: MockHistory[] = [];
 
-    if (usage === 0 && mockNames.length === 0) {
+    matchedMocks.forEach(m => {
+      const cat = extractExamCategory(m.testName || '');
+      if (cat.toLowerCase() === currentExamCategory.toLowerCase()) {
+        sameExamMocks.push(m);
+      } else {
+        otherExamMocks.push(m);
+      }
+    });
+
+    const sameExamCount = sameExamMocks.length;
+    const otherExamCount = otherExamMocks.length;
+    const totalPastUsage = sameExamCount + otherExamCount;
+
+    const allMockNames = Array.from(new Set(matchedMocks.map(m => m.testName || `Mock Test #${m.mockId || m.id}`)));
+    const sameExamMockNames = Array.from(new Set(sameExamMocks.map(m => m.testName || `Mock Test #${m.mockId || m.id}`)));
+    const otherExamMockNames = Array.from(new Set(otherExamMocks.map(m => m.testName || `Mock Test #${m.mockId || m.id}`)));
+
+    if (totalPastUsage === 0) {
       return {
         status: 'Fresh' as const,
         uniquenessPercent: 100,
-        badgeLabel: '100% Fresh - Never Used',
-        badgeHindi: '100% नया - ताज़ा प्रश्न',
+        badgeLabel: '100% Fresh - Never Used in Past Mocks',
+        badgeHindi: '100% नया - पिछले किसी भी मॉक में प्रयुक्त नहीं',
         colorClass: 'bg-emerald-950/90 text-emerald-300 border-emerald-600/70 shadow-sm',
         badgeBg: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40',
         icon: ShieldCheck,
-        mockNames: []
+        sameExamCount: 0,
+        otherExamCount: 0,
+        sameExamMockNames: [],
+        otherExamMockNames: [],
+        mockNames: [],
+        currentExamCategory
       };
-    } else if (usage === 1 || mockNames.length === 1) {
-      const firstMock = mockNames[0] || 'Previous Mock Paper';
+    } else if (sameExamCount > 0 && otherExamCount === 0) {
+      const firstMock = sameExamMockNames[0] || currentExamCategory;
+      const badgeLabel = sameExamCount === 1
+        ? `Used 1x in Same Exam (${firstMock})`
+        : `Used ${sameExamCount}x in Same Exam (${currentExamCategory})`;
+      const badgeHindi = sameExamCount === 1
+        ? `समान परीक्षा में 1 बार प्रयुक्त (${firstMock})`
+        : `समान परीक्षा (${currentExamCategory}) में ${sameExamCount} बार प्रयुक्त`;
+
       return {
-        status: 'Used' as const,
-        uniquenessPercent: 70,
-        badgeLabel: `Used 1x (${firstMock})`,
-        badgeHindi: `1 बार प्रयुक्त (${firstMock})`,
+        status: sameExamCount === 1 ? ('Used' as const) : ('Repeated' as const),
+        uniquenessPercent: Math.max(20, 100 - sameExamCount * 25),
+        badgeLabel,
+        badgeHindi,
         colorClass: 'bg-amber-950/90 text-amber-300 border-amber-600/70 shadow-sm',
         badgeBg: 'bg-amber-500/10 text-amber-300 border-amber-500/40',
         icon: AlertTriangle,
-        mockNames
+        sameExamCount,
+        otherExamCount: 0,
+        sameExamMockNames,
+        otherExamMockNames: [],
+        mockNames: allMockNames,
+        currentExamCategory
+      };
+    } else if (otherExamCount > 0 && sameExamCount === 0) {
+      const firstOther = otherExamMockNames[0] || 'Other Exam';
+      const badgeLabel = otherExamCount === 1
+        ? `Used 1x in Other Exam (${firstOther})`
+        : `Used ${otherExamCount}x in Other Exams (${otherExamMockNames.slice(0, 2).map(extractExamCategory).join(', ')})`;
+      const badgeHindi = otherExamCount === 1
+        ? `अन्य परीक्षा में 1 बार प्रयुक्त (${firstOther})`
+        : `अन्य परीक्षाओं में ${otherExamCount} बार प्रयुक्त`;
+
+      return {
+        status: otherExamCount === 1 ? ('Used' as const) : ('Repeated' as const),
+        uniquenessPercent: Math.max(30, 100 - otherExamCount * 20),
+        badgeLabel,
+        badgeHindi,
+        colorClass: 'bg-indigo-950/90 text-indigo-300 border-indigo-600/70 shadow-sm',
+        badgeBg: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/40',
+        icon: AlertTriangle,
+        sameExamCount: 0,
+        otherExamCount,
+        sameExamMockNames: [],
+        otherExamMockNames,
+        mockNames: allMockNames,
+        currentExamCategory
       };
     } else {
-      const countDisplay = usage > 0 ? usage : Math.max(2, mockNames.length);
+      const badgeLabel = `Used ${totalPastUsage}x (${sameExamCount}x Same Exam: ${currentExamCategory} + ${otherExamCount}x Other Exams)`;
+      const badgeHindi = `${totalPastUsage} बार प्रयुक्त (${sameExamCount}x समान परीक्षा + ${otherExamCount}x अन्य परीक्षा)`;
+
       return {
         status: 'Repeated' as const,
-        uniquenessPercent: Math.max(10, 100 - countDisplay * 20),
-        badgeLabel: `Repeated ${countDisplay}x in Mock Papers`,
-        badgeHindi: `${countDisplay} बार प्रयुक्त (दोहराया गया)`,
+        uniquenessPercent: Math.max(10, 100 - totalPastUsage * 20),
+        badgeLabel,
+        badgeHindi,
         colorClass: 'bg-rose-950/90 text-rose-300 border-rose-600/70 shadow-sm',
         badgeBg: 'bg-rose-500/10 text-rose-300 border-rose-500/40',
         icon: ShieldAlert,
-        mockNames
+        sameExamCount,
+        otherExamCount,
+        sameExamMockNames,
+        otherExamMockNames,
+        mockNames: allMockNames,
+        currentExamCategory
       };
     }
   };
@@ -1136,15 +1226,26 @@ Return ONLY valid JSON matching this schema:
                       </div>
 
                       {/* Uniqueness & Usage Indicator Badge */}
-                      <div className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1.5 ${uniqInfo.badgeBg} ${uniqInfo.colorClass}`}>
+                      <div className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1.5 flex-wrap gap-1 ${uniqInfo.badgeBg} ${uniqInfo.colorClass}`}>
                         <UniqIcon className="w-3.5 h-3.5 shrink-0" />
                         <span>{uniqInfo.badgeLabel}</span>
-                        {uniqInfo.mockNames.length > 0 && (
+
+                        {/* Breakdown Pills for Same Exam vs Other Exam */}
+                        {uniqInfo.sameExamCount > 0 && (
                           <span
-                            className="cursor-help text-[10px] underline opacity-80 hover:opacity-100 ml-1"
-                            title={`Used in papers: ${uniqInfo.mockNames.join(', ')}`}
+                            className="bg-amber-900/90 text-amber-200 border border-amber-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-help"
+                            title={`Same Exam (${uniqInfo.currentExamCategory}) Past Papers: ${uniqInfo.sameExamMockNames.join(', ')}`}
                           >
-                            (Mocks: {uniqInfo.mockNames.length})
+                            <span>🎯 Same Exam: {uniqInfo.sameExamCount}x</span>
+                          </span>
+                        )}
+
+                        {uniqInfo.otherExamCount > 0 && (
+                          <span
+                            className="bg-indigo-900/90 text-indigo-200 border border-indigo-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-help"
+                            title={`Other Exam Past Papers: ${uniqInfo.otherExamMockNames.join(', ')}`}
+                          >
+                            <span>🌐 Other Exams: {uniqInfo.otherExamCount}x</span>
                           </span>
                         )}
                       </div>

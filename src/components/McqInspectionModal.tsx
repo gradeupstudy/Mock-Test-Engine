@@ -27,7 +27,9 @@ import {
   Loader2,
   ShieldAlert,
   ListChecks,
-  SlidersHorizontal
+  SlidersHorizontal,
+  EyeOff,
+  RotateCcw
 } from 'lucide-react';
 
 export interface InspectionFlag {
@@ -55,8 +57,10 @@ export interface McqInspectionItem {
   index: number;
   question: Question;
   flags: InspectionFlag[];
+  activeFlags: InspectionFlag[];
   status: 'clean' | 'warning' | 'critical';
   healthScore: number;
+  isIgnored: boolean;
   aiVerified: boolean;
   aiSuggestedAnswer?: 'A' | 'B' | 'C' | 'D';
   aiConfidence?: number;
@@ -440,27 +444,38 @@ export function runStatic360Inspection(questions: Question[]): McqInspectionItem
       });
     }
 
-    // Compute Health Status & Score
-    const hasCritical = flags.some(f => f.severity === 'critical');
-    const hasWarning = flags.some(f => f.severity === 'warning');
+    // Compute Health Status & Score taking ignored flags into account
+    const ignoredFlagsList = q.ignoredFlags || [];
+    const isQuestionIgnored = !!q.isInspectionIgnored;
+
+    const activeFlags = flags.filter(
+      f => !isQuestionIgnored && !ignoredFlagsList.includes(f.id) && !ignoredFlagsList.includes(f.type)
+    );
+
+    const hasCritical = activeFlags.some(f => f.severity === 'critical');
+    const hasWarning = activeFlags.some(f => f.severity === 'warning');
 
     let status: 'clean' | 'warning' | 'critical' = 'clean';
     let healthScore = 100;
 
     if (hasCritical) {
       status = 'critical';
-      healthScore = Math.max(10, 100 - flags.filter(f => f.severity === 'critical').length * 35 - flags.filter(f => f.severity === 'warning').length * 10);
+      healthScore = Math.max(10, 100 - activeFlags.filter(f => f.severity === 'critical').length * 35 - activeFlags.filter(f => f.severity === 'warning').length * 10);
     } else if (hasWarning) {
       status = 'warning';
-      healthScore = Math.max(60, 100 - flags.filter(f => f.severity === 'warning').length * 15);
+      healthScore = Math.max(60, 100 - activeFlags.filter(f => f.severity === 'warning').length * 15);
     }
+
+    const isIgnored = isQuestionIgnored || (ignoredFlagsList.length > 0 && activeFlags.length < flags.length);
 
     return {
       index: idx,
       question: q,
       flags,
+      activeFlags,
       status,
       healthScore,
+      isIgnored,
       aiVerified: false
     };
   });
@@ -476,7 +491,7 @@ export const McqInspectionModal: React.FC<McqInspectionModalProps> = ({
   onReplaceQuestion,
   onUpdateAllQuestions
 }) => {
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'CLEAN'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'CLEAN' | 'IGNORED'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isAiAuditing, setIsAiAuditing] = useState<boolean>(false);
@@ -509,7 +524,8 @@ export const McqInspectionModal: React.FC<McqInspectionModalProps> = ({
     const total = inspectionItems.length;
     const criticalCount = inspectionItems.filter(i => i.status === 'critical').length;
     const warningCount = inspectionItems.filter(i => i.status === 'warning').length;
-    const cleanCount = inspectionItems.filter(i => i.status === 'clean').length;
+    const cleanCount = inspectionItems.filter(i => i.status === 'clean' && !i.isIgnored).length;
+    const ignoredCount = inspectionItems.filter(i => i.isIgnored).length;
 
     const avgScore = total > 0
       ? Math.round(inspectionItems.reduce((acc, i) => acc + i.healthScore, 0) / total)
@@ -519,7 +535,7 @@ export const McqInspectionModal: React.FC<McqInspectionModalProps> = ({
     if (avgScore < 70 || criticalCount > 3) grade = 'C (Needs Review)';
     else if (avgScore < 85 || criticalCount > 0) grade = 'B (Good with Minor Issues)';
 
-    return { total, criticalCount, warningCount, cleanCount, avgScore, grade };
+    return { total, criticalCount, warningCount, cleanCount, ignoredCount, avgScore, grade };
   }, [inspectionItems]);
 
   // Filtered List
@@ -527,7 +543,8 @@ export const McqInspectionModal: React.FC<McqInspectionModalProps> = ({
     return inspectionItems.filter(item => {
       if (activeFilter === 'CRITICAL' && item.status !== 'critical') return false;
       if (activeFilter === 'WARNING' && item.status !== 'warning') return false;
-      if (activeFilter === 'CLEAN' && item.status !== 'clean') return false;
+      if (activeFilter === 'CLEAN' && (item.status !== 'clean' || item.isIgnored)) return false;
+      if (activeFilter === 'IGNORED' && !item.isIgnored) return false;
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -1305,6 +1322,23 @@ Return strictly a JSON array of objects with schema:
                 {summary.cleanCount}
               </span>
             </button>
+
+            {summary.ignoredCount > 0 && (
+              <button
+                onClick={() => setActiveFilter('IGNORED')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                  activeFilter === 'IGNORED'
+                    ? 'bg-slate-700 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                <span>Ignored</span>
+                <span className="bg-slate-900 text-slate-300 px-1.5 py-0.2 text-[10px] rounded-full font-bold">
+                  {summary.ignoredCount}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Search Box */}
@@ -1374,7 +1408,12 @@ Return strictly a JSON array of objects with schema:
 
                     {/* Status Badge & Action Buttons */}
                     <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                      {item.status === 'clean' ? (
+                      {item.isIgnored ? (
+                        <span className="inline-flex items-center space-x-1 text-xs font-extrabold bg-slate-800/90 text-slate-300 border border-slate-700 px-3 py-1 rounded-full">
+                          <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Warning Ignored (इग्नोर किया)</span>
+                        </span>
+                      ) : item.status === 'clean' ? (
                         <span className="inline-flex items-center space-x-1 text-xs font-extrabold bg-emerald-950/90 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                           <span>Verified 100% Clean</span>
@@ -1390,6 +1429,44 @@ Return strictly a JSON array of objects with schema:
                           <span>Minor Warning</span>
                         </span>
                       )}
+
+                      {/* 👁️ Ignore / Unignore Warning Button */}
+                      {item.isIgnored ? (
+                        <button
+                          onClick={() => {
+                            onUpdateQuestion(idx, {
+                              ...q,
+                              isInspectionIgnored: false,
+                              ignoredFlags: [],
+                              updatedDate: new Date().toISOString()
+                            });
+                            setAutoFixMessage(`Restored inspection warnings for Question #${idx + 1}.`);
+                            setTimeout(() => setAutoFixMessage(null), 3000);
+                          }}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 rounded-xl text-xs transition-colors flex items-center space-x-1 font-semibold"
+                          title="Restore/Unignore warnings for this question"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="hidden sm:inline">Unignore</span>
+                        </button>
+                      ) : item.flags.length > 0 ? (
+                        <button
+                          onClick={() => {
+                            onUpdateQuestion(idx, {
+                              ...q,
+                              isInspectionIgnored: true,
+                              updatedDate: new Date().toISOString()
+                            });
+                            setAutoFixMessage(`All inspection warnings ignored for Question #${idx + 1}.`);
+                            setTimeout(() => setAutoFixMessage(null), 3000);
+                          }}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs transition-colors flex items-center space-x-1 font-semibold"
+                          title="Ignore warning for this question (गलत/अनचाही चेतावनी इग्नोर करें)"
+                        >
+                          <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="hidden sm:inline">Ignore Warning</span>
+                        </button>
+                      ) : null}
 
                       {/* ⚡ AI Auto-Fix Button */}
                       <button
@@ -1428,9 +1505,9 @@ Return strictly a JSON array of objects with schema:
                   </div>
 
                   {/* Flagged Issue Banners if any */}
-                  {item.flags.length > 0 && (
+                  {item.activeFlags.length > 0 && (
                     <div className="space-y-2">
-                      {item.flags.map(flag => (
+                      {item.activeFlags.map(flag => (
                         <div
                           key={flag.id}
                           className={`p-3 rounded-xl border text-xs flex items-start space-x-2.5 ${
@@ -1448,25 +1525,47 @@ Return strictly a JSON array of objects with schema:
                             <strong className="block font-bold">{flag.title}</strong>
                             <p className="mt-0.5 opacity-90">{flag.description}</p>
 
-                            {/* ⚡ Quick Fix Button for Answer Key Mismatch */}
-                            {flag.type === 'ai_answer_mismatch' && flag.suggestedFix && (
+                            <div className="mt-2 flex items-center space-x-2 flex-wrap gap-y-1">
+                              {/* ⚡ Quick Fix Button for Answer Key Mismatch */}
+                              {flag.type === 'ai_answer_mismatch' && flag.suggestedFix && (
+                                <button
+                                  onClick={() => {
+                                    onUpdateQuestion(idx, {
+                                      ...q,
+                                      answer: flag.suggestedFix,
+                                      aiAuditResult: undefined,
+                                      updatedDate: new Date().toISOString()
+                                    });
+                                    setAutoFixMessage(`Fixed answer key for Question #${idx + 1} to Option ${flag.suggestedFix}!`);
+                                    setTimeout(() => setAutoFixMessage(null), 3500);
+                                  }}
+                                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors inline-flex items-center space-x-1.5 shadow-sm"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>⚡ Apply Correct Key (Set Option {flag.suggestedFix})</span>
+                                </button>
+                              )}
+
+                              {/* 👁️ Ignore specific flag button */}
                               <button
                                 onClick={() => {
+                                  const currentIgnored = q.ignoredFlags || [];
+                                  const updatedIgnored = [...currentIgnored, flag.id, flag.type];
                                   onUpdateQuestion(idx, {
                                     ...q,
-                                    answer: flag.suggestedFix,
-                                    aiAuditResult: undefined,
+                                    ignoredFlags: updatedIgnored,
                                     updatedDate: new Date().toISOString()
                                   });
-                                  setAutoFixMessage(`Fixed answer key for Question #${idx + 1} to Option ${flag.suggestedFix}!`);
-                                  setTimeout(() => setAutoFixMessage(null), 3500);
+                                  setAutoFixMessage(`Warning "${flag.title}" ignored for Question #${idx + 1}.`);
+                                  setTimeout(() => setAutoFixMessage(null), 3000);
                                 }}
-                                className="mt-2 bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors inline-flex items-center space-x-1.5 shadow-sm"
+                                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-2.5 py-1.5 rounded-lg text-xs transition-colors inline-flex items-center space-x-1.5 border border-slate-700 shadow-sm"
+                                title="Ignore this specific warning (इस चेतावनी को इग्नोर करें)"
                               >
-                                <Check className="w-3.5 h-3.5" />
-                                <span>⚡ Apply Correct Key (Set Option {flag.suggestedFix})</span>
+                                <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Ignore Warning (इग्नोर करें)</span>
                               </button>
-                            )}
+                            </div>
 
                             {/* ⚡ Quick Fix Button for All Options Incorrect */}
                             {flag.type === 'all_options_incorrect' && (
@@ -1565,6 +1664,32 @@ Return strictly a JSON array of objects with schema:
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Ignored Flags Indicator Banner if any flags are ignored */}
+                  {item.isIgnored && (
+                    <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 text-xs flex items-center justify-between text-slate-400">
+                      <div className="flex items-center space-x-2">
+                        <EyeOff className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span>Warnings have been manually ignored for this question.</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          onUpdateQuestion(idx, {
+                            ...q,
+                            isInspectionIgnored: false,
+                            ignoredFlags: [],
+                            updatedDate: new Date().toISOString()
+                          });
+                          setAutoFixMessage(`Restored inspection warnings for Question #${idx + 1}.`);
+                          setTimeout(() => setAutoFixMessage(null), 3000);
+                        }}
+                        className="text-blue-400 hover:text-blue-300 font-semibold flex items-center space-x-1 underline text-xs shrink-0"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Restore Warnings (Unignore)</span>
+                      </button>
                     </div>
                   )}
 

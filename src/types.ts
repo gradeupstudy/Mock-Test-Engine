@@ -50,6 +50,8 @@ export interface Question {
     analysisReason: string;
     confidenceScore?: number;
   };
+  isInspectionIgnored?: boolean;
+  ignoredFlags?: string[];
   createdDate: string;
   updatedDate: string;
 }
