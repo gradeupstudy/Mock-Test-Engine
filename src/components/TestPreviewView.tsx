@@ -94,6 +94,12 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   // Uniqueness Filter State
   const [selectedUniquenessFilter, setSelectedUniquenessFilter] = useState<'ALL' | 'FRESH' | 'USED' | 'REPEATED'>('ALL');
 
+  // Uniqueness Detail Modal State
+  const [uniquenessDetailModal, setUniquenessDetailModal] = useState<{
+    question: Question;
+    questionIndex: number;
+  } | null>(null);
+
   // Dual Language Translation State
   const [isTranslatingBilingual, setIsTranslatingBilingual] = useState<boolean>(false);
   const [translatingSingleIdx, setTranslatingSingleIdx] = useState<number | null>(null);
@@ -117,8 +123,14 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
     });
 
     const matchedMocks = pastMocks.filter(m => {
-      if (q.id !== undefined && m.questionIds && m.questionIds.includes(q.id)) {
+      if (q.id !== undefined && m.questionIds && m.questionIds.map(String).includes(String(q.id))) {
         return true;
+      }
+      if (m.questions && Array.isArray(m.questions)) {
+        return m.questions.some(mq =>
+          (q.id !== undefined && String(mq.id) === String(q.id)) ||
+          (mq.question && q.question && mq.question.trim().toLowerCase() === q.question.trim().toLowerCase())
+        );
       }
       return false;
     });
@@ -157,6 +169,9 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
         otherExamCount: 0,
         sameExamMockNames: [],
         otherExamMockNames: [],
+        sameExamMocks: [],
+        otherExamMocks: [],
+        totalPastUsage: 0,
         mockNames: [],
         currentExamCategory
       };
@@ -181,6 +196,9 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
         otherExamCount: 0,
         sameExamMockNames,
         otherExamMockNames: [],
+        sameExamMocks,
+        otherExamMocks: [],
+        totalPastUsage,
         mockNames: allMockNames,
         currentExamCategory
       };
@@ -205,6 +223,9 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
         otherExamCount,
         sameExamMockNames: [],
         otherExamMockNames,
+        sameExamMocks: [],
+        otherExamMocks,
+        totalPastUsage,
         mockNames: allMockNames,
         currentExamCategory
       };
@@ -224,6 +245,9 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
         otherExamCount,
         sameExamMockNames,
         otherExamMockNames,
+        sameExamMocks,
+        otherExamMocks,
+        totalPastUsage,
         mockNames: allMockNames,
         currentExamCategory
       };
@@ -1226,27 +1250,41 @@ Return ONLY valid JSON matching this schema:
                       </div>
 
                       {/* Uniqueness & Usage Indicator Badge */}
-                      <div className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1.5 flex-wrap gap-1 ${uniqInfo.badgeBg} ${uniqInfo.colorClass}`}>
+                      <div
+                        onClick={() => setUniquenessDetailModal({ question: q, questionIndex: idx })}
+                        className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center space-x-1.5 flex-wrap gap-1 cursor-pointer hover:opacity-90 active:scale-[0.98] transition-all shadow-sm ${uniqInfo.badgeBg} ${uniqInfo.colorClass}`}
+                        title="Click to view complete details: Exam names and Mock Test numbers where this MCQ was repeated"
+                      >
                         <UniqIcon className="w-3.5 h-3.5 shrink-0" />
                         <span>{uniqInfo.badgeLabel}</span>
 
                         {/* Breakdown Pills for Same Exam vs Other Exam */}
                         {uniqInfo.sameExamCount > 0 && (
-                          <span
-                            className="bg-amber-900/90 text-amber-200 border border-amber-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-help"
-                            title={`Same Exam (${uniqInfo.currentExamCategory}) Past Papers: ${uniqInfo.sameExamMockNames.join(', ')}`}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUniquenessDetailModal({ question: q, questionIndex: idx });
+                            }}
+                            className="bg-amber-900/90 hover:bg-amber-800 text-amber-200 border border-amber-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-pointer transition-colors shadow-xs"
+                            title={`Same Exam (${uniqInfo.currentExamCategory}) Past Papers: ${uniqInfo.sameExamMockNames.join(', ')} - Click for complete details`}
                           >
                             <span>🎯 Same Exam: {uniqInfo.sameExamCount}x</span>
-                          </span>
+                          </button>
                         )}
 
                         {uniqInfo.otherExamCount > 0 && (
-                          <span
-                            className="bg-indigo-900/90 text-indigo-200 border border-indigo-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-help"
-                            title={`Other Exam Past Papers: ${uniqInfo.otherExamMockNames.join(', ')}`}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUniquenessDetailModal({ question: q, questionIndex: idx });
+                            }}
+                            className="bg-indigo-900/90 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/80 px-2 py-0.5 rounded text-[10px] font-extrabold flex items-center space-x-1 ml-1 cursor-pointer transition-colors shadow-xs"
+                            title={`Other Exam Past Papers: ${uniqInfo.otherExamMockNames.join(', ')} - Click for complete details`}
                           >
                             <span>🌐 Other Exams: {uniqInfo.otherExamCount}x</span>
-                          </span>
+                          </button>
                         )}
                       </div>
 
@@ -2287,6 +2325,196 @@ Return ONLY valid JSON matching this schema:
                 className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2 rounded-xl text-xs"
               >
                 Close Swipe Deck
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Uniqueness Usage Breakdown Detail Modal */}
+      {uniquenessDetailModal !== null && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[#0e1230] border border-blue-500/60 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl relative my-8 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                    <span>MCQ Past Papers Repetition History</span>
+                    <span className="text-xs font-normal text-slate-400">(Q #{uniquenessDetailModal.questionIndex + 1})</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Current Exam Category: <strong className="text-amber-300 font-bold">{currentExamCategory}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setUniquenessDetailModal(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Question Statement Box */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5 flex-shrink-0">
+              <div className="flex items-center space-x-2">
+                <span className="bg-blue-950 text-blue-300 border border-blue-800/60 text-[10px] font-bold px-2 py-0.5 rounded">
+                  {uniquenessDetailModal.question.subject || 'General'}
+                </span>
+                {uniquenessDetailModal.question.chapter && (
+                  <span className="text-slate-400 text-[10px]">
+                    • {uniquenessDetailModal.question.chapter}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-white font-medium line-clamp-3 leading-relaxed">
+                "{uniquenessDetailModal.question.question}"
+              </p>
+            </div>
+
+            {/* Modal Content Details */}
+            {(() => {
+              const details = getQuestionUniquenessDetails(uniquenessDetailModal.question);
+              return (
+                <div className="space-y-4 flex-1 overflow-y-auto pr-1 my-1">
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-slate-950/90 border border-slate-800 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block font-semibold">Total Past Usage</span>
+                      <span className="text-base font-extrabold text-amber-400">{details.totalPastUsage}x</span>
+                    </div>
+                    <div className="bg-amber-950/40 border border-amber-800/60 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-amber-300 block font-semibold">Same Exam ({details.currentExamCategory})</span>
+                      <span className="text-base font-extrabold text-amber-300">{details.sameExamCount}x</span>
+                    </div>
+                    <div className="bg-indigo-950/40 border border-indigo-800/60 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-indigo-300 block font-semibold">Other Exams</span>
+                      <span className="text-base font-extrabold text-indigo-300">{details.otherExamCount}x</span>
+                    </div>
+                  </div>
+
+                  {/* Same Exam Mock Papers List */}
+                  {details.sameExamMocks.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-amber-400 text-xs font-bold border-b border-amber-900/40 pb-1">
+                        <span>🎯 Same Exam Past Mock Papers ({details.currentExamCategory})</span>
+                        <span className="bg-amber-950 text-amber-300 border border-amber-700/60 px-2 py-0.5 rounded text-[10px]">
+                          {details.sameExamMocks.length} Papers
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {details.sameExamMocks.map((mock, mIdx) => (
+                          <div
+                            key={mock.id || mIdx}
+                            className="bg-amber-950/30 border border-amber-800/60 hover:border-amber-600 p-3 rounded-xl flex items-center justify-between text-xs transition-colors"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-amber-200">{mock.testName}</span>
+                                <span className="bg-slate-950 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-mono border border-slate-800">
+                                  #{mock.mockId || mock.id || `M-${mIdx + 1}`}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-3 text-[11px] text-slate-400">
+                                <span>📅 Date: {mock.createdDate ? new Date(mock.createdDate).toLocaleDateString('en-GB') : 'N/A'}</span>
+                                <span>•</span>
+                                <span>📝 {mock.questionIds?.length || mock.questions?.length || 'N/A'} MCQs</span>
+                                <span>•</span>
+                                <span>⏱️ {mock.duration || 60} Mins</span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold text-amber-300 bg-amber-900/80 border border-amber-700 px-2.5 py-1 rounded-lg whitespace-nowrap">
+                              Repeated Here
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Other Exam Mock Papers List */}
+                  {details.otherExamMocks.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-indigo-400 text-xs font-bold border-b border-indigo-900/40 pb-1">
+                        <span>🌐 Other Exam Past Mock Papers</span>
+                        <span className="bg-indigo-950 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded text-[10px]">
+                          {details.otherExamMocks.length} Papers
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {details.otherExamMocks.map((mock, mIdx) => {
+                          const otherCategory = extractExamCategory(mock.testName || '');
+                          return (
+                            <div
+                              key={mock.id || mIdx}
+                              className="bg-indigo-950/30 border border-indigo-800/60 hover:border-indigo-600 p-3 rounded-xl flex items-center justify-between text-xs transition-colors"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center space-x-2 flex-wrap gap-1">
+                                  <span className="font-bold text-indigo-200">{mock.testName}</span>
+                                  <span className="bg-indigo-900 text-indigo-200 px-2 py-0.5 rounded text-[10px] font-semibold border border-indigo-700">
+                                    {otherCategory}
+                                  </span>
+                                  <span className="bg-slate-950 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-mono border border-slate-800">
+                                    #{mock.mockId || mock.id || `M-${mIdx + 1}`}
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-3 text-[11px] text-slate-400">
+                                  <span>📅 Date: {mock.createdDate ? new Date(mock.createdDate).toLocaleDateString('en-GB') : 'N/A'}</span>
+                                  <span>•</span>
+                                  <span>📝 {mock.questionIds?.length || mock.questions?.length || 'N/A'} MCQs</span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-bold text-indigo-300 bg-indigo-900/80 border border-indigo-700 px-2.5 py-1 rounded-lg whitespace-nowrap">
+                                Used Here
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {details.totalPastUsage === 0 && (
+                    <div className="p-6 bg-emerald-950/30 border border-emerald-800/60 rounded-xl text-center space-y-2">
+                      <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto" />
+                      <h4 className="text-xs font-bold text-emerald-300">100% Fresh Question</h4>
+                      <p className="text-[11px] text-slate-300">
+                        This question has never been included in any previously saved mock test paper in your library.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Footer with Actions */}
+            <div className="flex items-center justify-between border-t border-slate-800 pt-3 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = uniquenessDetailModal.questionIndex;
+                  setUniquenessDetailModal(null);
+                  handleSmartSwap(idx);
+                }}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-md transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Auto Swap with Fresh MCQ</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUniquenessDetailModal(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-xl text-xs font-semibold transition-colors"
+              >
+                Close Details
               </button>
             </div>
           </div>
