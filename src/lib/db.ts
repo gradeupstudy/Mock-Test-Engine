@@ -559,6 +559,18 @@ export async function addMock(mock: Omit<MockHistory, 'id'>): Promise<number> {
   });
 }
 
+export async function updateMock(mock: MockHistory): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('mockHistory', 'readwrite');
+    const store = tx.objectStore('mockHistory');
+    const request = store.put(mock);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function addMocksBatch(mocks: MockHistory[]): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {

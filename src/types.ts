@@ -63,6 +63,7 @@ export interface MockHistory {
   marks: number;
   duration: number;
   questionIds: number[];
+  questions?: Question[];
   uniqueness: number;
   createdDate: string;
 }

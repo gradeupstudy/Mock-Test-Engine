@@ -376,6 +376,7 @@ export function App() {
                 setActiveTestMarks(mock.marks || mockQs.length * 2);
                 setActiveTestDuration(mock.duration || 60);
                 setActiveUniquenessScore(mock.uniqueness || 100);
+                setActiveTab('preview');
               }}
               onNavigateToTemplates={() => setActiveTab('templates')}
             />

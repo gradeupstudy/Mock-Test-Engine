@@ -363,6 +363,7 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
         marks: totalMarks,
         duration,
         questionIds: result.selectedQuestions.map(q => q.id!).filter(Boolean),
+        questions: result.selectedQuestions,
         uniqueness: result.uniquenessScore,
         createdDate: new Date().toISOString()
       };

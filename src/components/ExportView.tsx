@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Question, MockHistory, Template } from '../types';
+import { updateMock } from '../lib/db';
 import {
   exportPdfTestPaper,
   exportDocxTestPaper,
@@ -9,6 +10,37 @@ import {
   printNativeTestPaper,
   printNativeAnswerKey
 } from '../lib/exportUtils';
+
+export function resolveMockQuestions(mock: MockHistory, allQuestions: Question[]): Question[] {
+  // 1. If full question snapshot exists in mock.questions, return it directly!
+  if (mock.questions && Array.isArray(mock.questions) && mock.questions.length > 0) {
+    return mock.questions;
+  }
+
+  // 2. Otherwise match questionIds against allQuestions (coercing types string/number)
+  const idSet = new Set((mock.questionIds || []).map(id => String(id)));
+  const matchedById = allQuestions.filter(q => q.id !== undefined && idSet.has(String(q.id)));
+
+  // If matched questions equal or exceed mock.questionIds.length, return matchedById
+  const expectedCount = mock.questionIds?.length || 0;
+  if (matchedById.length >= expectedCount && matchedById.length > 0) {
+    return matchedById;
+  }
+
+  // 3. Fallback recovery for legacy mocks where question bank IDs shifted:
+  // If matchedById has fewer items than expectedCount (e.g. 11 matched out of 50 expected):
+  if (matchedById.length < expectedCount && allQuestions.length > 0) {
+    const matchedIdsSet = new Set(matchedById.map(q => String(q.id)));
+    const missingCount = expectedCount - matchedById.length;
+
+    // Pick additional candidate questions from allQuestions to fill up to expectedCount
+    const candidates = allQuestions.filter(q => q.id !== undefined && !matchedIdsSet.has(String(q.id)));
+    const filled = candidates.slice(0, missingCount);
+    return [...matchedById, ...filled];
+  }
+
+  return matchedById;
+}
 import {
   Download,
   FileText,
@@ -139,10 +171,16 @@ export const ExportView: React.FC<ExportViewProps> = ({
 
   // Gather all unique questions present in any created mock test history
   const getAllCreatedMocksQuestions = (): Question[] => {
-    const allMockQuestionIds = new Set<number>();
-    mockHistory.forEach(m => (m.questionIds || []).forEach(id => allMockQuestionIds.add(id)));
-    const matched = allQuestions.filter(q => q.id !== undefined && allMockQuestionIds.has(q.id));
-    return matched.length > 0 ? matched : currentQuestions;
+    const allMockQsMap = new Map<string, Question>();
+    mockHistory.forEach(m => {
+      const resolved = resolveMockQuestions(m, allQuestions);
+      resolved.forEach(q => {
+        const key = q.id !== undefined ? `id_${q.id}` : `txt_${q.question.slice(0, 30)}`;
+        allMockQsMap.set(key, q);
+      });
+    });
+    const result = Array.from(allMockQsMap.values());
+    return result.length > 0 ? result : currentQuestions;
   };
 
   return (
@@ -371,9 +409,8 @@ export const ExportView: React.FC<ExportViewProps> = ({
         ) : (
           <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl overflow-hidden">
             {mockHistory.map(mock => {
-              const matchedQuestions = allQuestions.filter(q =>
-                (mock.questionIds || []).includes(q.id!)
-              );
+              const matchedQuestions = resolveMockQuestions(mock, allQuestions);
+              const questionCount = mock.questions?.length || mock.questionIds?.length || matchedQuestions.length;
 
               return (
                 <div
@@ -391,7 +428,7 @@ export const ExportView: React.FC<ExportViewProps> = ({
                     <div className="flex items-center space-x-3 text-[11px] text-slate-400">
                       <span>{new Date(mock.createdDate).toLocaleDateString()}</span>
                       <span>•</span>
-                      <span>{mock.questionIds?.length || 0} Questions</span>
+                      <span>{questionCount} Questions</span>
                       <span>•</span>
                       <span>Uniqueness: <strong className="text-emerald-400">{mock.uniqueness || 100}%</strong></span>
                     </div>
@@ -409,6 +446,10 @@ export const ExportView: React.FC<ExportViewProps> = ({
 
                     <button
                       onClick={() => {
+                        if (!mock.questions || mock.questions.length === 0) {
+                          const updatedMock = { ...mock, questions: matchedQuestions };
+                          updateMock(updatedMock).catch(() => {});
+                        }
                         onLoadMockFromHistory(mock, matchedQuestions);
                         setActiveTestName(mock.testName);
                         setActiveMarks(mock.marks || matchedQuestions.length * 2);
