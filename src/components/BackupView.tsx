@@ -17,7 +17,15 @@ import {
 } from 'lucide-react';
 import { SupabaseStorageModal } from './SupabaseStorageModal';
 import { PinModal } from './PinModal';
-import { getStoredSupabaseConfig, compressJsonToGzip, decompressGzipToJson } from '../lib/supabaseClient';
+import {
+  getStoredSupabaseConfig,
+  compressJsonToGzip,
+  decompressGzipToJson,
+  syncQuestionsToSupabase,
+  replaceQuestionsInSupabase,
+  syncMockHistoryToSupabase
+} from '../lib/supabaseClient';
+import { clearDeletedMcqsLog } from '../lib/mcqLogUtils';
 
 interface BackupViewProps {
   questions: Question[];
@@ -159,14 +167,19 @@ export const BackupView: React.FC<BackupViewProps> = ({
         await addQuestionsBatch(parsed.questions);
         if (Array.isArray(parsed.mockHistory) && parsed.mockHistory.length > 0) {
           await addMocksBatch(parsed.mockHistory);
+          await syncMockHistoryToSupabase(parsed.mockHistory).catch(() => {});
         }
-        setStatusMessage(`Successfully appended ${parsed.questions.length} questions and mock history to your database.`);
+        await syncQuestionsToSupabase(parsed.questions).catch(() => {});
+        setStatusMessage(`Successfully appended ${parsed.questions.length} questions and mock history to your database and Supabase.`);
       } else {
         await replaceAllQuestions(parsed.questions);
+        clearDeletedMcqsLog();
         if (Array.isArray(parsed.mockHistory)) {
           await replaceAllMocks(parsed.mockHistory);
+          await syncMockHistoryToSupabase(parsed.mockHistory).catch(() => {});
         }
-        setStatusMessage(`Successfully replaced database with ${parsed.questions.length} questions and ${parsed.mockHistory?.length || 0} mock tests.`);
+        await replaceQuestionsInSupabase(parsed.questions).catch(() => {});
+        setStatusMessage(`Successfully replaced database and Supabase table with ${parsed.questions.length} questions and ${parsed.mockHistory?.length || 0} mock tests.`);
       }
 
       onDataRestored();

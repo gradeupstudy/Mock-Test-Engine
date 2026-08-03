@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { gzip, ungzip } from 'pako';
 import { Question, MockHistory } from '../types';
-import { getDeletedMcqsLog } from './mcqLogUtils';
+import { getDeletedMcqsLog, clearDeletedMcqsLog } from './mcqLogUtils';
 
 const STORAGE_KEY_URL = 'gradeup_supabase_url';
 const STORAGE_KEY_ANON = 'gradeup_supabase_anon_key';
@@ -285,6 +285,29 @@ export async function syncQuestionsToSupabase(questions: Question[]): Promise<{ 
   } catch (err: any) {
     console.error('Supabase syncQuestions exception:', err);
     return { success: false, count: 0, error: err.message || 'Sync failed' };
+  }
+}
+
+export async function replaceQuestionsInSupabase(questions: Question[]): Promise<{ success: boolean; count: number; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, count: 0, error: 'Supabase client is not configured.' };
+
+  try {
+    // 1. Wipe all existing questions in Supabase table
+    await clearAllQuestionsFromSupabase();
+
+    // 2. Clear deleted log so old deleted markers don't interfere
+    clearDeletedMcqsLog();
+
+    // 3. Insert all restored questions into Supabase
+    if (!questions || questions.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    return await syncQuestionsToSupabase(questions);
+  } catch (err: any) {
+    console.error('replaceQuestionsInSupabase exception:', err);
+    return { success: false, count: 0, error: err.message };
   }
 }
 

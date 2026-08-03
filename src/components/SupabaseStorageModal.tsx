@@ -28,11 +28,16 @@ import {
   listJsonBackupsFromSupabaseBucket,
   downloadJsonBackupFromSupabaseBucket,
   deleteJsonBackupFromSupabaseBucket,
+  syncQuestionsToSupabase,
+  replaceQuestionsInSupabase,
+  syncMockHistoryToSupabase,
+  clearAllQuestionsFromSupabase,
   SupabaseStorageBackupFile,
   SUPABASE_SQL_SCHEMA
 } from '../lib/supabaseClient';
 import { Question, MockHistory } from '../types';
-import { addQuestionsBatch, replaceAllQuestions, addMocksBatch, replaceAllMocks } from '../lib/db';
+import { addQuestionsBatch, replaceAllQuestions, clearAllQuestions, addMocksBatch, replaceAllMocks } from '../lib/db';
+import { clearDeletedMcqsLog } from '../lib/mcqLogUtils';
 
 interface SupabaseStorageModalProps {
   isOpen: boolean;
@@ -188,17 +193,33 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
     }
 
     if (confirm(`Found ${restoredQs.length} MCQs and ${restoredMocks.length} Mock Tests in Supabase backup file.\n\nClick OK to APPEND to existing local data.\nClick Cancel to REPLACE all existing local data.`)) {
-      if (restoredQs.length > 0) await addQuestionsBatch(restoredQs);
-      if (restoredMocks.length > 0) await addMocksBatch(restoredMocks);
+      if (restoredQs.length > 0) {
+        await addQuestionsBatch(restoredQs);
+        await syncQuestionsToSupabase(restoredQs).catch(() => {});
+      }
+      if (restoredMocks.length > 0) {
+        await addMocksBatch(restoredMocks);
+        await syncMockHistoryToSupabase(restoredMocks).catch(() => {});
+      }
       setStatusMsg({
-        text: `Successfully decompressed and appended ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage to IndexedDB!`,
+        text: `Successfully decompressed and appended ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage to IndexedDB & Supabase Table!`,
         type: 'success'
       });
     } else {
-      if (restoredQs.length > 0) await replaceAllQuestions(restoredQs);
-      if (restoredMocks.length > 0) await replaceAllMocks(restoredMocks);
+      if (restoredQs.length > 0) {
+        await replaceAllQuestions(restoredQs);
+        clearDeletedMcqsLog();
+        await replaceQuestionsInSupabase(restoredQs).catch(() => {});
+      } else {
+        await clearAllQuestions();
+        await clearAllQuestionsFromSupabase().catch(() => {});
+      }
+      if (restoredMocks.length > 0) {
+        await replaceAllMocks(restoredMocks);
+        await syncMockHistoryToSupabase(restoredMocks).catch(() => {});
+      }
       setStatusMsg({
-        text: `Successfully decompressed and replaced local database with ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage!`,
+        text: `Successfully decompressed and replaced database & Supabase Table with ${restoredQs.length} MCQs and ${restoredMocks.length} mock tests from Supabase Storage!`,
         type: 'success'
       });
     }
