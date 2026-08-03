@@ -14,7 +14,7 @@ import { DuplicateModal } from './components/DuplicateModal';
 
 import { Question, MockHistory, Template, AiConfig, DeletedMcqItem, AddedMcqItem } from './types';
 import { getStoredAiConfig } from './lib/aiClient';
-import { getStoredSupabaseConfig, syncAllMcqsWithSupabase, syncQuestionsToSupabase, deleteQuestionsFromSupabase } from './lib/supabaseClient';
+import { getStoredSupabaseConfig, syncAllMcqsWithSupabase, syncQuestionsToSupabase, deleteQuestionsFromSupabase, clearAllQuestionsFromSupabase } from './lib/supabaseClient';
 import {
   getDeletedMcqsLog,
   addDeletedMcqsToLog,
@@ -154,7 +154,11 @@ export function App() {
     }
     setQuestions(prev => prev.filter(item => item.id !== id));
     await deleteQuestion(id);
-    await deleteQuestionsFromSupabase([id]).catch(() => {});
+    if (toDelete) {
+      await deleteQuestionsFromSupabase([toDelete]).catch(() => {});
+    } else {
+      await deleteQuestionsFromSupabase([id]).catch(() => {});
+    }
     const updatedQs = await getAllQuestions();
     setQuestions(updatedQs);
   };
@@ -168,7 +172,11 @@ export function App() {
     }
     setQuestions(prev => prev.filter(item => !setIds.has(item.id!)));
     await deleteQuestionsBatch(ids);
-    await deleteQuestionsFromSupabase(ids).catch(() => {});
+    if (toDelete.length > 0) {
+      await deleteQuestionsFromSupabase(toDelete).catch(() => {});
+    } else {
+      await deleteQuestionsFromSupabase(ids).catch(() => {});
+    }
     const updatedQs = await getAllQuestions();
     setQuestions(updatedQs);
   };
@@ -179,6 +187,7 @@ export function App() {
       refreshMcqLogs();
     }
     await clearAllQuestions();
+    await clearAllQuestionsFromSupabase().catch(() => {});
     setQuestions([]);
   };
 

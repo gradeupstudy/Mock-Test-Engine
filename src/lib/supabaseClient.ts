@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { gzip, ungzip } from 'pako';
 import { Question, MockHistory } from '../types';
+import { getDeletedMcqsLog } from './mcqLogUtils';
 
 const STORAGE_KEY_URL = 'gradeup_supabase_url';
 const STORAGE_KEY_ANON = 'gradeup_supabase_anon_key';
@@ -156,23 +157,80 @@ export async function fetchAllQuestionsFromSupabaseTable(client: SupabaseClient)
   return { data: allRows, error: null };
 }
 
-export async function deleteQuestionsFromSupabase(ids: number[]): Promise<{ success: boolean; error?: string }> {
+export async function deleteQuestionsFromSupabase(
+  targets: (number | Partial<Question>)[]
+): Promise<{ success: boolean; error?: string }> {
   const client = getSupabaseClient();
-  if (!client || ids.length === 0) return { success: true };
+  if (!client || !targets || targets.length === 0) return { success: true };
 
   try {
-    const batchSize = 200;
-    for (let i = 0; i < ids.length; i += batchSize) {
-      const chunk = ids.slice(i, i + batchSize);
-      const { error } = await client.from('questions').delete().in('id', chunk);
-      if (error) {
-        console.error('Supabase batch delete error:', error.message);
-        return { success: false, error: error.message };
+    const idsToDelete = new Set<number>();
+    const questionTextsToDelete = new Set<string>();
+
+    targets.forEach(t => {
+      if (typeof t === 'number') {
+        if (!isNaN(t)) idsToDelete.add(t);
+      } else if (t && typeof t === 'object') {
+        if (t.id !== undefined && t.id !== null && !isNaN(Number(t.id))) {
+          idsToDelete.add(Number(t.id));
+        }
+        if (t.question && typeof t.question === 'string' && t.question.trim()) {
+          questionTextsToDelete.add(t.question.trim());
+        }
+      }
+    });
+
+    const idsArray = Array.from(idsToDelete);
+    const textsArray = Array.from(questionTextsToDelete);
+
+    if (idsArray.length === 0 && textsArray.length === 0) {
+      return { success: true };
+    }
+
+    // 1. Delete by numeric ID in batch chunks
+    if (idsArray.length > 0) {
+      const batchSize = 200;
+      for (let i = 0; i < idsArray.length; i += batchSize) {
+        const chunk = idsArray.slice(i, i + batchSize);
+        const { error } = await client.from('questions').delete().in('id', chunk);
+        if (error) {
+          console.warn('Supabase batch delete by ID warning:', error.message);
+        }
       }
     }
+
+    // 2. Delete by Question text in batch chunks (catches cases where local ID != Supabase ID)
+    if (textsArray.length > 0) {
+      const batchSize = 100;
+      for (let i = 0; i < textsArray.length; i += batchSize) {
+        const chunk = textsArray.slice(i, i + batchSize);
+        const { error } = await client.from('questions').delete().in('question', chunk);
+        if (error) {
+          console.warn('Supabase batch delete by Question text warning:', error.message);
+        }
+      }
+    }
+
     return { success: true };
   } catch (err: any) {
     console.error('Supabase batch delete exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function clearAllQuestionsFromSupabase(): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: true };
+
+  try {
+    const { error } = await client.from('questions').delete().neq('id', -999999);
+    if (error) {
+      console.error('Supabase clearAllQuestions error:', error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    console.error('Supabase clearAllQuestions exception:', err);
     return { success: false, error: err.message };
   }
 }
@@ -473,13 +531,43 @@ export async function syncAllMcqsWithSupabase(localQuestions: Question[]): Promi
       localByKey.set(normalizeKey(q.subject, q.question), q);
     });
 
-    // Deduplicate cloud records so old duplicate rows in Supabase do not re-populate
+    // Deduplicate cloud records and filter out deleted MCQs so deleted items do not re-populate
+    const deletedLog = getDeletedMcqsLog();
+    const deletedKeySet = new Set<string>();
+    const deletedIdSet = new Set<number>();
+    const deletedTextSet = new Set<string>();
+
+    deletedLog.forEach(item => {
+      if (item && item.question) {
+        if (item.question.id !== undefined && item.question.id !== null) {
+          deletedIdSet.add(item.question.id);
+        }
+        if (item.id !== undefined && item.id !== null) {
+          deletedIdSet.add(item.id);
+        }
+        if (item.question.question && item.question.question.trim()) {
+          const normKey = normalizeKey(item.question.subject, item.question.question);
+          deletedKeySet.add(normKey);
+          deletedTextSet.add(item.question.question.trim().toLowerCase());
+        }
+      }
+    });
+
     const seenCloudKeys = new Map<string, any>();
     const redundantCloudIds: number[] = [];
+    const cloudRecordsToPurge: any[] = [];
 
     cloudRecords.forEach((q: any) => {
       const qKey = normalizeKey(q.subject, q.question);
-      if (!seenCloudKeys.has(qKey)) {
+      const qText = (q.question || '').trim().toLowerCase();
+
+      const isDeletedInLog = (q.id !== undefined && deletedIdSet.has(q.id)) ||
+                             (qKey && deletedKeySet.has(qKey)) ||
+                             (qText && deletedTextSet.has(qText));
+
+      if (isDeletedInLog) {
+        cloudRecordsToPurge.push(q);
+      } else if (!seenCloudKeys.has(qKey)) {
         seenCloudKeys.set(qKey, q);
       } else {
         // Redundant duplicate copy in cloud
@@ -489,7 +577,10 @@ export async function syncAllMcqsWithSupabase(localQuestions: Question[]): Promi
       }
     });
 
-    // Auto-purge redundant duplicate copies from Supabase in background
+    // Auto-purge deleted items and redundant duplicate copies from Supabase in background
+    if (cloudRecordsToPurge.length > 0) {
+      deleteQuestionsFromSupabase(cloudRecordsToPurge).catch(() => {});
+    }
     if (redundantCloudIds.length > 0) {
       deleteQuestionsFromSupabase(redundantCloudIds).catch(() => {});
     }
@@ -532,15 +623,21 @@ export async function syncAllMcqsWithSupabase(localQuestions: Question[]): Promi
       };
     });
 
-    // 4. PRESERVE LOCAL QUESTIONS: Add any local question that is not present in Cloud
+    // 4. PRESERVE LOCAL QUESTIONS: Add any local question that is not present in Cloud (unless deleted)
     for (const localQ of localQuestions) {
       const qKey = normalizeKey(localQ.subject, localQ.question);
-      const hasKey = mergedSet.has(qKey);
+      const qText = (localQ.question || '').trim().toLowerCase();
+      const isDeletedInLog = (localQ.id !== undefined && deletedIdSet.has(localQ.id)) ||
+                             (qKey && deletedKeySet.has(qKey)) ||
+                             (qText && deletedTextSet.has(qText));
 
-      if (!hasKey) {
-        mergedQuestions.push(localQ);
-        mergedSet.add(qKey);
-        if (localQ.id !== undefined) mergedIdSet.add(localQ.id);
+      if (!isDeletedInLog) {
+        const hasKey = mergedSet.has(qKey);
+        if (!hasKey) {
+          mergedQuestions.push(localQ);
+          mergedSet.add(qKey);
+          if (localQ.id !== undefined) mergedIdSet.add(localQ.id);
+        }
       }
     }
 
