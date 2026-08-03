@@ -19,6 +19,7 @@ import {
   getDeletedMcqsLog,
   addDeletedMcqsToLog,
   removeDeletedMcqFromLog,
+  removeQuestionsFromDeletedLog,
   clearDeletedMcqsLog,
   getAddedMcqsLog,
   addAddedMcqsToLog,
@@ -129,6 +130,7 @@ export function App() {
   const handleAddQuestion = async (q: Omit<Question, 'id'>) => {
     const newId = await addQuestion(q);
     const newQObj: Question = { ...q, id: newId };
+    removeQuestionsFromDeletedLog([newQObj]);
     addAddedMcqsToLog([newQObj]);
     refreshMcqLogs();
     setQuestions(prev => [newQObj, ...prev]);

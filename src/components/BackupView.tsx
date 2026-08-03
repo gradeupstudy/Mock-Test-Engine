@@ -25,7 +25,7 @@ import {
   replaceQuestionsInSupabase,
   syncMockHistoryToSupabase
 } from '../lib/supabaseClient';
-import { clearDeletedMcqsLog } from '../lib/mcqLogUtils';
+import { clearDeletedMcqsLog, removeQuestionsFromDeletedLog } from '../lib/mcqLogUtils';
 
 interface BackupViewProps {
   questions: Question[];
@@ -164,6 +164,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
       }
 
       if (confirm(`Found ${parsed.questions.length} questions in backup. Do you want to APPEND them to existing questions? (Click Cancel to REPLACE all existing questions).`)) {
+        removeQuestionsFromDeletedLog(parsed.questions);
         await addQuestionsBatch(parsed.questions);
         if (Array.isArray(parsed.mockHistory) && parsed.mockHistory.length > 0) {
           await addMocksBatch(parsed.mockHistory);

@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { gzip, ungzip } from 'pako';
 import { Question, MockHistory } from '../types';
-import { getDeletedMcqsLog, clearDeletedMcqsLog } from './mcqLogUtils';
+import { getDeletedMcqsLog, clearDeletedMcqsLog, removeQuestionsFromDeletedLog } from './mcqLogUtils';
 
 const STORAGE_KEY_URL = 'gradeup_supabase_url';
 const STORAGE_KEY_ANON = 'gradeup_supabase_anon_key';
@@ -547,6 +547,11 @@ export async function syncAllMcqsWithSupabase(localQuestions: Question[]): Promi
     const { data: finalCloudData, error: finalErr } = await fetchAllQuestionsFromSupabaseTable(client);
     const cloudRecords = (finalErr || !finalCloudData) ? cloudQuestions : finalCloudData;
 
+    // Remove any questions present in localQuestions from deletedLog since they are active locally
+    if (localQuestions.length > 0) {
+      removeQuestionsFromDeletedLog(localQuestions);
+    }
+
     const localById = new Map<number, Question>();
     const localByKey = new Map<string, Question>();
     localQuestions.forEach(q => {
@@ -584,9 +589,15 @@ export async function syncAllMcqsWithSupabase(localQuestions: Question[]): Promi
       const qKey = normalizeKey(q.subject, q.question);
       const qText = (q.question || '').trim().toLowerCase();
 
-      const isDeletedInLog = (q.id !== undefined && deletedIdSet.has(q.id)) ||
+      // A question present in localQuestions is ALIVE locally and must NOT be purged
+      const isPresentInLocal = (q.id !== undefined && localById.has(q.id)) ||
+                               (qKey && localByKey.has(qKey));
+
+      const isDeletedInLog = !isPresentInLocal && (
+                             (q.id !== undefined && deletedIdSet.has(q.id)) ||
                              (qKey && deletedKeySet.has(qKey)) ||
-                             (qText && deletedTextSet.has(qText));
+                             (qText && deletedTextSet.has(qText))
+                             );
 
       if (isDeletedInLog) {
         cloudRecordsToPurge.push(q);

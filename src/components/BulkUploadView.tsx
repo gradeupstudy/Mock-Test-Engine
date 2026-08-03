@@ -1173,6 +1173,8 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
     }));
 
     const { addQuestionsBatch } = await import('../lib/db');
+    const { removeQuestionsFromDeletedLog } = await import('../lib/mcqLogUtils');
+    removeQuestionsFromDeletedLog(questionsToSave as Question[]);
     await addQuestionsBatch(questionsToSave);
 
     onImportSuccess(questionsToSave.length);

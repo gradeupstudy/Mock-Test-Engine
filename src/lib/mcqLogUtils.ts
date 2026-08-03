@@ -45,6 +45,44 @@ export function removeDeletedMcqFromLog(id: number): void {
   }
 }
 
+export function removeQuestionsFromDeletedLog(questions: Question[]): void {
+  if (!questions || questions.length === 0) return;
+  const current = getDeletedMcqsLog();
+  if (current.length === 0) return;
+
+  const idsToRemove = new Set<number>();
+  const textKeysToRemove = new Set<string>();
+
+  questions.forEach(q => {
+    if (q.id !== undefined && q.id !== null) idsToRemove.add(q.id);
+    if (q.question && q.question.trim()) {
+      const key = `${(q.subject || '').trim().toLowerCase()}:::${q.question.trim().toLowerCase()}`;
+      textKeysToRemove.add(key);
+      textKeysToRemove.add(q.question.trim().toLowerCase());
+    }
+  });
+
+  const updated = current.filter(item => {
+    if (!item || !item.question) return false;
+    if (item.id !== undefined && idsToRemove.has(item.id)) return false;
+    if (item.question.id !== undefined && idsToRemove.has(item.question.id)) return false;
+    
+    if (item.question.question && item.question.question.trim()) {
+      const itemText = item.question.question.trim().toLowerCase();
+      const itemKey = `${(item.question.subject || '').trim().toLowerCase()}:::${itemText}`;
+      if (textKeysToRemove.has(itemKey) || textKeysToRemove.has(itemText)) return false;
+    }
+
+    return true;
+  });
+
+  try {
+    localStorage.setItem(KEY_DELETED_MCQS, JSON.stringify(updated));
+  } catch (err) {
+    console.warn('Failed to update deleted MCQs log:', err);
+  }
+}
+
 export function clearDeletedMcqsLog(): void {
   try {
     localStorage.removeItem(KEY_DELETED_MCQS);

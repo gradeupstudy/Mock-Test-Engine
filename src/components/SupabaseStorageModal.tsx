@@ -37,7 +37,7 @@ import {
 } from '../lib/supabaseClient';
 import { Question, MockHistory } from '../types';
 import { addQuestionsBatch, replaceAllQuestions, clearAllQuestions, addMocksBatch, replaceAllMocks } from '../lib/db';
-import { clearDeletedMcqsLog } from '../lib/mcqLogUtils';
+import { clearDeletedMcqsLog, removeQuestionsFromDeletedLog } from '../lib/mcqLogUtils';
 
 interface SupabaseStorageModalProps {
   isOpen: boolean;
@@ -194,6 +194,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
 
     if (confirm(`Found ${restoredQs.length} MCQs and ${restoredMocks.length} Mock Tests in Supabase backup file.\n\nClick OK to APPEND to existing local data.\nClick Cancel to REPLACE all existing local data.`)) {
       if (restoredQs.length > 0) {
+        removeQuestionsFromDeletedLog(restoredQs);
         await addQuestionsBatch(restoredQs);
         await syncQuestionsToSupabase(restoredQs).catch(() => {});
       }
