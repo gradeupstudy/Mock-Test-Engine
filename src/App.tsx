@@ -14,7 +14,7 @@ import { DuplicateModal } from './components/DuplicateModal';
 
 import { Question, MockHistory, Template, AiConfig, DeletedMcqItem, AddedMcqItem } from './types';
 import { getStoredAiConfig } from './lib/aiClient';
-import { getStoredSupabaseConfig, syncAllMcqsWithSupabase, syncQuestionsToSupabase, deleteQuestionsFromSupabase, clearAllQuestionsFromSupabase } from './lib/supabaseClient';
+import { getStoredSupabaseConfig, syncAllMcqsWithSupabase, syncQuestionsToSupabase, deleteQuestionsFromSupabase, clearAllQuestionsFromSupabase, syncMockHistoryToSupabase } from './lib/supabaseClient';
 import {
   getDeletedMcqsLog,
   addDeletedMcqsToLog,
@@ -36,11 +36,46 @@ import {
   clearAllQuestions,
   getAllMocks,
   deleteMock,
+  updateMock,
   getAllTemplates,
   saveTemplate,
   deleteTemplate,
   DEFAULT_TEMPLATE
 } from './lib/db';
+
+const ACTIVE_TEST_SESSION_KEY = 'gradeup_active_test_session_v1';
+
+interface ActiveTestSession {
+  questions: Question[];
+  testName: string;
+  marks: number;
+  duration: number;
+  uniqueness: number;
+  mockId: number | null;
+}
+
+export function saveActiveTestSession(session: ActiveTestSession) {
+  try {
+    localStorage.setItem(ACTIVE_TEST_SESSION_KEY, JSON.stringify(session));
+  } catch (e) {
+    console.warn('Failed to save active test session:', e);
+  }
+}
+
+export function getStoredActiveTestSession(): ActiveTestSession | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TEST_SESSION_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load active test session:', e);
+  }
+  return null;
+}
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveModule>('dashboard');
@@ -68,6 +103,7 @@ export function App() {
   const [activeTestMarks, setActiveTestMarks] = useState<number>(100);
   const [activeTestDuration, setActiveTestDuration] = useState<number>(60);
   const [activeUniquenessScore, setActiveUniquenessScore] = useState<number>(100);
+  const [activeMockId, setActiveMockId] = useState<number | null>(null);
 
   // Gemini / AI Config State
   const [isGeminiModalOpen, setIsGeminiModalOpen] = useState<boolean>(false);
@@ -92,9 +128,36 @@ export function App() {
         setCurrentTemplate(loadedTpls[0]);
       }
 
-      // If active test paper is empty, load sample questions for quick test
-      if (activeTestQuestions.length === 0 && loadedQs.length > 0) {
-        setActiveTestQuestions(loadedQs.slice(0, 10));
+      // Check for saved active test session in localStorage first so refresh retains generated explanations
+      const storedSession = getStoredActiveTestSession();
+      if (storedSession && storedSession.questions.length > 0) {
+        setActiveTestQuestions(storedSession.questions);
+        if (storedSession.testName) setActiveTestName(storedSession.testName);
+        if (storedSession.marks) setActiveTestMarks(storedSession.marks);
+        if (storedSession.duration) setActiveTestDuration(storedSession.duration);
+        if (storedSession.uniqueness !== undefined) setActiveUniquenessScore(storedSession.uniqueness);
+        if (storedSession.mockId !== undefined) setActiveMockId(storedSession.mockId);
+      } else if (loadedMocks.length > 0 && loadedMocks[0].questions && loadedMocks[0].questions.length > 0) {
+        // Fallback: load latest mock test from history
+        const latestMock = loadedMocks[0];
+        setActiveTestQuestions(latestMock.questions);
+        setActiveTestName(latestMock.testName);
+        setActiveTestMarks(latestMock.marks || latestMock.questions.length * 2);
+        setActiveTestDuration(latestMock.duration || 60);
+        setActiveUniquenessScore(latestMock.uniqueness || 100);
+        setActiveMockId(latestMock.mockId || latestMock.id || null);
+      } else if (loadedQs.length > 0) {
+        // Fallback: load sample questions for quick test
+        const initialQs = loadedQs.slice(0, 10);
+        setActiveTestQuestions(initialQs);
+        saveActiveTestSession({
+          questions: initialQs,
+          testName: activeTestName,
+          marks: activeTestMarks,
+          duration: activeTestDuration,
+          uniqueness: activeUniquenessScore,
+          mockId: null
+        });
       }
 
       // Automatically sync with Supabase on startup if configured
@@ -220,6 +283,74 @@ export function App() {
     triggerSupabaseAutoSync(updatedLocal);
   };
 
+  const handleUpdateTestQuestions = async (qs: Question[]) => {
+    setActiveTestQuestions(qs);
+
+    // 1. Save active test session to localStorage so refresh retains all questions & explanations
+    saveActiveTestSession({
+      questions: qs,
+      testName: activeTestName,
+      marks: activeTestMarks,
+      duration: activeTestDuration,
+      uniqueness: activeUniquenessScore,
+      mockId: activeMockId
+    });
+
+    // 2. Update questions in main Question Bank DB for questions that have an ID
+    const questionsWithId = qs.filter(q => q.id !== undefined && q.id !== null);
+    if (questionsWithId.length > 0) {
+      await handleUpdateBatch(questionsWithId);
+    }
+
+    // 3. Update question bank entries matching by question text if ID is missing
+    const bankMapByText = new Map<string, Question>(questions.map(q => [q.question.trim().toLowerCase(), q]));
+    const bankUpdates: Question[] = [];
+    qs.forEach(q => {
+      if (q.question) {
+        const textKey = q.question.trim().toLowerCase();
+        const existing = bankMapByText.get(textKey);
+        if (existing && existing.id !== undefined) {
+          bankUpdates.push({
+            ...existing,
+            explanation: q.explanation || existing.explanation,
+            optionA: q.optionA,
+            optionB: q.optionB,
+            optionC: q.optionC,
+            optionD: q.optionD,
+            answer: q.answer,
+            translation: q.translation || existing.translation,
+            updatedDate: new Date().toISOString()
+          });
+        }
+      }
+    });
+    if (bankUpdates.length > 0) {
+      await handleUpdateBatch(bankUpdates);
+    }
+
+    // 4. Update the corresponding MockHistory record in IndexedDB & Supabase so mock history stores updated explanations
+    const allMocks = await getAllMocks();
+    const targetMock = allMocks.find(m => 
+      (activeMockId !== null && (m.mockId === activeMockId || m.id === activeMockId)) ||
+      (m.testName && m.testName.trim().toLowerCase() === activeTestName.trim().toLowerCase())
+    );
+
+    if (targetMock) {
+      const updatedMockItem: MockHistory = {
+        ...targetMock,
+        questions: qs,
+        questionIds: qs.map(q => q.id!).filter(Boolean),
+        uniqueness: activeUniquenessScore,
+        marks: activeTestMarks,
+        duration: activeTestDuration
+      };
+      await updateMock(updatedMockItem);
+      syncMockHistoryToSupabase([updatedMockItem]).catch(() => {});
+      const reloadedMocks = await getAllMocks();
+      setMockHistory(reloadedMocks);
+    }
+  };
+
   const handleMockGenerated = (
     selectedQs: Question[],
     mockId: number,
@@ -232,6 +363,17 @@ export function App() {
     setActiveTestMarks(marks);
     setActiveTestDuration(duration);
     setActiveUniquenessScore(100);
+    setActiveMockId(mockId);
+
+    saveActiveTestSession({
+      questions: selectedQs,
+      testName,
+      marks,
+      duration,
+      uniqueness: 100,
+      mockId
+    });
+
     loadDatabaseData(); // Refresh history
   };
 
@@ -350,13 +492,7 @@ export function App() {
               uniquenessScore={activeUniquenessScore}
               allBankQuestions={questions}
               mockHistory={mockHistory}
-              onUpdateTestQuestions={async (qs) => {
-                setActiveTestQuestions(qs);
-                const questionsWithId = qs.filter(q => q.id !== undefined);
-                if (questionsWithId.length > 0) {
-                  await handleUpdateBatch(questionsWithId);
-                }
-              }}
+              onUpdateTestQuestions={handleUpdateTestQuestions}
               onNavigateToExport={() => setActiveTab('export')}
             />
           )}
@@ -382,11 +518,23 @@ export function App() {
               duration={activeTestDuration}
               onDeleteMock={handleDeleteMock}
               onLoadMockFromHistory={(mock, mockQs) => {
-                setActiveTestQuestions(mockQs);
+                const qsToUse = (mock.questions && mock.questions.length > 0) ? mock.questions : mockQs;
+                setActiveTestQuestions(qsToUse);
                 setActiveTestName(mock.testName);
-                setActiveTestMarks(mock.marks || mockQs.length * 2);
+                setActiveTestMarks(mock.marks || qsToUse.length * 2);
                 setActiveTestDuration(mock.duration || 60);
                 setActiveUniquenessScore(mock.uniqueness || 100);
+                setActiveMockId(mock.mockId || mock.id || null);
+
+                saveActiveTestSession({
+                  questions: qsToUse,
+                  testName: mock.testName,
+                  marks: mock.marks || qsToUse.length * 2,
+                  duration: mock.duration || 60,
+                  uniqueness: mock.uniqueness || 100,
+                  mockId: mock.mockId || mock.id || null
+                });
+
                 setActiveTab('preview');
               }}
               onNavigateToTemplates={() => setActiveTab('templates')}

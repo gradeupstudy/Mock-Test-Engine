@@ -794,9 +794,27 @@ async function translateTextToEnglishServer(text: string): Promise<string> {
   return "";
 }
 
+function trimToMaxWordsServer(text: string, maxWords: number = 200): string {
+  if (!text || !text.trim()) return "";
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maxWords) return text.trim();
+
+  const truncatedWords = words.slice(0, maxWords).join(" ");
+  const lastPunct = Math.max(
+    truncatedWords.lastIndexOf("."),
+    truncatedWords.lastIndexOf("!"),
+    truncatedWords.lastIndexOf("?"),
+    truncatedWords.lastIndexOf("\n")
+  );
+  if (lastPunct > truncatedWords.length * 0.6) {
+    return truncatedWords.slice(0, lastPunct + 1).trim();
+  }
+  return truncatedWords.trim() + ".";
+}
+
 async function ensureDualLanguageExplanationServer(rawExp: string, subject?: string, chapter?: string): Promise<string> {
   if (!rawExp || !rawExp.trim()) return "";
-  const trimmed = rawExp.trim();
+  const trimmed = trimToMaxWordsServer(rawExp.trim(), 160);
 
   const isLang = isLangSubject(subject, chapter);
 
@@ -808,41 +826,43 @@ async function ensureDualLanguageExplanationServer(rawExp: string, subject?: str
     // If it's a Hindi language subject but explanation is in English, translate to Hindi
     if (isHindiLang && !/[\u0900-\u097F]/.test(trimmed)) {
       const hiTrans = await translateTextToHindiServer(trimmed);
-      return hiTrans || trimmed;
+      return trimToMaxWordsServer(hiTrans || trimmed, 200);
     }
-    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+    return trimToMaxWordsServer(cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter), 200);
   }
 
   // FOR ALL OTHER SECTIONS & SUBJECTS: MUST BE DUAL LANGUAGE (English & Hindi)
   const hasEnglish = /[a-zA-Z]/.test(trimmed);
   const hasHindi = /[\u0900-\u097F]/.test(trimmed);
 
-  // If it already has both English and Hindi text, just clean math purna viram
+  // If it already has both English and Hindi text, just clean math purna viram and cap at 200 words
   if (hasEnglish && hasHindi) {
-    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+    return trimToMaxWordsServer(cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter), 200);
   }
 
   // If it is English only (typical Tavily response), translate to Hindi & combine
   if (hasEnglish && !hasHindi) {
-    let hindiTranslation = await translateTextToHindiServer(trimmed);
+    const shortEng = trimToMaxWordsServer(trimmed, 80);
+    let hindiTranslation = await translateTextToHindiServer(shortEng);
     if (hindiTranslation) {
-      hindiTranslation = cleanPurnaViramForMathReasoningServer(hindiTranslation, subject, chapter);
-      return `English: ${trimmed}\n\nहिंदी: ${hindiTranslation}`;
+      hindiTranslation = cleanPurnaViramForMathReasoningServer(trimToMaxWordsServer(hindiTranslation, 80), subject, chapter);
+      return trimToMaxWordsServer(`English: ${shortEng}\n\nहिंदी: ${hindiTranslation}`, 200);
     }
-    return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+    return trimToMaxWordsServer(cleanPurnaViramForMathReasoningServer(shortEng, subject, chapter), 200);
   }
 
   // If it is Hindi only, translate to English & combine
   if (hasHindi && !hasEnglish) {
-    let englishTranslation = await translateTextToEnglishServer(trimmed);
-    const cleanedHindi = cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+    const shortHi = trimToMaxWordsServer(trimmed, 80);
+    let englishTranslation = await translateTextToEnglishServer(shortHi);
+    const cleanedHindi = cleanPurnaViramForMathReasoningServer(shortHi, subject, chapter);
     if (englishTranslation) {
-      return `English: ${englishTranslation}\n\nहिंदी: ${cleanedHindi}`;
+      return trimToMaxWordsServer(`English: ${trimToMaxWordsServer(englishTranslation, 80)}\n\nहिंदी: ${cleanedHindi}`, 200);
     }
-    return cleanedHindi;
+    return trimToMaxWordsServer(cleanedHindi, 200);
   }
 
-  return cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter);
+  return trimToMaxWordsServer(cleanPurnaViramForMathReasoningServer(trimmed, subject, chapter), 200);
 }
 
 // Dedicated Tavily Explanation Generator Engine
@@ -857,16 +877,16 @@ async function callTavilyExplain(apiKey: string, questions: any[]): Promise<any[
     const isMathReasoning = isMathOrReasoningSubjectServer(q.subject, q.chapter);
     const subLower = (q.subject || "").toLowerCase();
 
-    let langInstruction = "Provide a comprehensive, detailed step-by-step educational explanation in DUAL LANGUAGE (English & Hindi). Format:\nEnglish: <Detailed step-by-step explanation in English>\nहिंदी: <विस्तृत चरण-दर-चरण व्याख्या हिंदी में>";
+    let langInstruction = "Provide a simple, clear, student-friendly explanation in DUAL LANGUAGE (English & Hindi) under 80 words. Format:\nEnglish: <clear simple explanation>\nहिंदी: <सरल व्याख्या>";
     if (isLang) {
       if (subLower.includes("hindi") || subLower.includes("हिन्दी")) {
-        langInstruction = "Provide comprehensive, detailed step-by-step explanation strictly in HINDI.";
+        langInstruction = "Provide a simple, clear explanation strictly in HINDI under 80 words.";
       } else {
-        langInstruction = "Provide comprehensive, detailed step-by-step explanation strictly in ENGLISH.";
+        langInstruction = "Provide a simple, clear explanation strictly in ENGLISH under 80 words.";
       }
     }
     if (isMathReasoning) {
-      langInstruction += " MANDATE FOR MATH/REASONING: Provide full step-by-step mathematical calculation, formula, given values, and working steps. DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead.";
+      langInstruction += " MANDATE FOR MATH/REASONING: Provide a clear step-by-step mathematical working, formula, and calculation under 80 words. DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead.";
     }
 
     const optA = q.optionA || q.options?.A || "";
@@ -891,7 +911,7 @@ Instruction: ${langInstruction}`;
           query,
           search_depth: "advanced",
           include_answer: true,
-          max_results: 5
+          max_results: 3
         })
       });
 
@@ -902,15 +922,15 @@ Instruction: ${langInstruction}`;
 
       const data = await res.json();
       const ansStr = (data.answer || "").trim();
-      const resultsContent = Array.isArray(data.results)
-        ? data.results.map((r: any) => r.content).filter(Boolean).join("\n\n")
-        : "";
 
       let rawExplanationText = "";
-      if (ansStr && resultsContent) {
-        rawExplanationText = `${ansStr}\n\n${resultsContent}`;
-      } else {
-        rawExplanationText = ansStr || resultsContent;
+      if (ansStr && ansStr.length >= 15) {
+        // Use Tavily's direct synthesized answer (concise ~50-80 words, clear summary)
+        rawExplanationText = trimToMaxWordsServer(ansStr, 80);
+      } else if (Array.isArray(data.results) && data.results.length > 0) {
+        // Use top search snippet capped at 80 words
+        const topSnippet = data.results[0]?.content || "";
+        rawExplanationText = trimToMaxWordsServer(topSnippet, 80);
       }
 
       if (!rawExplanationText || rawExplanationText.trim().length < 10) {
@@ -921,7 +941,7 @@ Instruction: ${langInstruction}`;
 
       if (isMathReasoning) {
         if (!/step|चरण|given|दिया|formula|सूत्र|calculation|गणना/i.test(explanationText)) {
-          explanationText = `Given Data & Concept (दिया गया मान एवं सूत्र):\n- Question: ${q.question}\n- Correct Option: Option ${ansLetter} (${optVal})\n\nStep 1: Step-by-Step Solution & Working (चरण 1: विस्तृत हल एवं मान रखना):\n${rawExplanationText}\n\nStep 2: Conclusion (चरण 2: निष्कर्ष):\nTherefore, Option ${ansLetter} (${optVal}) is the correct answer.`;
+          explanationText = `Given Data & Concept (दिया गया मान एवं सूत्र):\n- Question: ${q.question}\n- Correct Option: Option ${ansLetter} (${optVal})\n\nStep-by-Step Solution (हल):\n${rawExplanationText}\n\nFinal Answer (निष्कर्ष): Option ${ansLetter} (${optVal})`;
         }
       }
 
@@ -1644,32 +1664,27 @@ app.post("/api/gemini/explain", async (req, res) => {
       };
     });
 
-    const prompt = `Generate a comprehensive, clear, accurate, step-by-step educational explanation for each MCQ below explaining why the specified correct answer is right.
+    const prompt = `Generate a clear, student-friendly, step-by-step educational explanation for each MCQ below explaining why the specified correct answer is right.
 
-CRITICAL EXPLANATION QUALITY & MATHEMATICAL SOLUTION MANDATES:
-1. MANDATORY STEP-BY-STEP SOLUTION FOR MATHEMATICS & REASONING (where "isMathOrReasoning" is true or subject is Mathematics, Quantitative Aptitude, Reasoning, Arithmetic, Algebra, Geometry, Statistics, Physics numericals):
-   Every Math and Reasoning question MUST be answered with a DETAILED STEP-BY-STEP MATHEMATICAL SOLUTION.
-   Required structure for Math/Reasoning explanations:
-   - **Given Data & Formula / Concept (दिया गया मान एवं सूत्र)**: Clearly list given values from the question and the formula or rule used.
-   - **Step 1: Substitution & Calculation (चरण 1: मान रखना एवं विस्तृत हल)**: Show the step-by-step substitution of values into the formula and full calculation.
-   - **Step 2: Simplification (चरण 2: सरलीकरण)**: Show intermediate calculation steps to arrive at the solution.
-   - **Final Answer (अंतिम उत्तर एवं निष्कर्ष)**: Explicitly state the final result matching Option (A/B/C/D).
-   NEVER output a short 1-sentence answer for Math or Reasoning questions! Full mathematical working steps are REQUIRED.
+CRITICAL LENGTH, QUALITY & MATHEMATICAL SOLUTION MANDATES:
+1. MAX 200 WORDS LIMIT (VERY IMPORTANT):
+   - Every explanation string MUST NOT EXCEED 200 WORDS TOTAL!
+   - Keep explanations medium-length, simple, clear, and easy for students to understand.
+   - Do NOT output lengthy essays, huge paragraphs, or massive blocks of text.
 
-2. MANDATORY DETAILED EXPLANATION FOR ALL OTHER SUBJECTS (GS, Science, History, Geography, Polity, Computer, HP GK, etc.):
-   Explanations must be thorough, educational, and comprehensive (at least 3-5 detailed sentences per language section).
-   Explain:
-   a) The core concept / definition / historical context.
-   b) Step-by-step logical reasoning why the specified correct option is right.
-   c) Context on why other options are incorrect or inapplicable.
-   NEVER output brief, truncated, or superficial 1-sentence explanations!
+2. STEP-BY-STEP SOLUTION FOR MATHEMATICS & REASONING (where "isMathOrReasoning" is true or subject is Math/Reasoning/Aptitude):
+   Every Math and Reasoning question MUST be answered with a clear, simple step-by-step mathematical solution that a student can easily follow:
+   - **Given & Concept (दिया गया मान एवं सूत्र)**: List given values and formula used.
+   - **Step 1: Working & Calculation (चरण 1: हल एवं गणना)**: Show step-by-step working clearly.
+   - **Final Answer (अंतिम उत्तर)**: State the correct option.
+   Keep it concise, clear, and UNDER 200 WORDS TOTAL!
 
 3. DUAL LANGUAGE (BILINGUAL) FORMAT:
    For all subjects/sections (except pure English or pure Hindi language/grammar tests where "isLanguageSubject" is true):
    Each explanation string MUST include BOTH the English explanation paragraph AND the Hindi explanation paragraph:
 
-   English: <Detailed step-by-step explanation in English detailing why the option is correct>
-   हिंदी: <विस्तृत व्याख्या हिंदी में कि यह विकल्प क्यों सही है>
+   English: <Clear simple step-by-step explanation in English, max 75 words>
+   हिंदी: <छात्रों के लिए आसान एवं सरल व्याख्या हिंदी में, max 75 words>
 
 4. HINDI PURNA VIRAM ('।') RESTRICTION FOR MATH:
    In Hindi text for Math & Reasoning topics, DO NOT use Hindi Purna Viram symbol ('।') at sentence ends; use standard full stop ('.') instead so '।' is not misread as number '1'.
@@ -1679,7 +1694,7 @@ ${JSON.stringify(formattedQuestions, null, 2)}
 
 Return response strictly as a JSON array where each object has keys: "index", "idTemp" or "id", and "explanation".`;
 
-    const systemInstruction = "You are an expert educational tutor and master mathematician. MANDATE: For Math and Reasoning questions, you MUST provide full step-by-step mathematical solutions with Given Data, Step 1 Calculation, Step 2 Simplification, and Final Answer. For all non-language subjects, generate thorough explanations in DUAL LANGUAGE (Bilingual: English + Hindi). Short 1-sentence explanations are STRICTLY FORBIDDEN.";
+    const systemInstruction = "You are an expert educational tutor. MANDATE: Generate simple, clear, student-friendly step-by-step explanations. Total explanation string MUST BE STRICTLY UNDER 200 WORDS (around 60-80 words per language section). For Math/Reasoning, provide clear step-by-step solution steps (Given, Step-by-Step Working, Final Answer) under 200 words total. For non-language subjects, provide dual language (English + Hindi).";
 
     const text = await executeAiCallServer(req.body, prompt, systemInstruction);
     const parsed = cleanAndParseJson(text);

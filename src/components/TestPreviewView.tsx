@@ -76,6 +76,12 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
 }) => {
   const [questions, setQuestions] = useState<Question[]>(testQuestions);
   const [isSaved, setIsSaved] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (testQuestions && testQuestions.length > 0) {
+      setQuestions(testQuestions);
+    }
+  }, [testQuestions]);
   const [isSavingEdits, setIsSavingEdits] = useState<boolean>(false);
   const [selectedFilterSection, setSelectedFilterSection] = useState<string>('ALL');
   const [editingModalIndex, setEditingModalIndex] = useState<number | null>(null);
@@ -796,7 +802,15 @@ Return ONLY valid JSON matching this schema:
               : (typeof item.explanation === 'object' && item.explanation !== null
                   ? ((item.explanation as any).text || (item.explanation as any).explanation || JSON.stringify(item.explanation))
                   : String(item.explanation || '')));
-        handleFieldChange(index, 'explanation', expStr);
+        
+        const updated = questions.map((prevQ, i) =>
+          i === index ? { ...prevQ, explanation: expStr, updatedDate: new Date().toISOString() } : prevQ
+        );
+        setQuestions(updated);
+        setIsSaved(false);
+        if (onUpdateTestQuestions) {
+          onUpdateTestQuestions(updated);
+        }
       }
     } catch (err: any) {
       alert('AI Explanation failed: ' + err.message);
@@ -815,7 +829,7 @@ Return ONLY valid JSON matching this schema:
       const results = await callAiTranslateDualLanguage(questions);
       if (results && results.length > 0) {
         setIsSaved(false);
-        setQuestions(prev => prev.map((q, idx) => {
+        const updatedList = questions.map((q, idx) => {
           const res = results.find(r => r.index === idx) || results[idx];
           if (!res || res.skippedLanguageSubject) return q;
           const sanitized = sanitizeBilingualQuestionAndTranslation(
@@ -833,7 +847,11 @@ Return ONLY valid JSON matching this schema:
             explanation: res.explanation || q.explanation,
             updatedDate: new Date().toISOString()
           };
-        }));
+        });
+        setQuestions(updatedList);
+        if (onUpdateTestQuestions) {
+          onUpdateTestQuestions(updatedList);
+        }
         setTranslationNotification(`Successfully translated ${questions.length} MCQs into Dual Language (Hindi + English)!`);
       } else {
         setTranslationNotification('Translation returned no changes.');
@@ -861,7 +879,7 @@ Return ONLY valid JSON matching this schema:
           return;
         }
         setIsSaved(false);
-        setQuestions(prev => prev.map((item, i) => {
+        const updatedList = questions.map((item, i) => {
           if (i === idx) {
             const sanitized = sanitizeBilingualQuestionAndTranslation(
               res.question || item.question,
@@ -880,7 +898,11 @@ Return ONLY valid JSON matching this schema:
             };
           }
           return item;
-        }));
+        });
+        setQuestions(updatedList);
+        if (onUpdateTestQuestions) {
+          onUpdateTestQuestions(updatedList);
+        }
         setTranslationNotification(`Question #${idx + 1} translated to Dual Language!`);
         setTimeout(() => setTranslationNotification(null), 4000);
       }
