@@ -4,6 +4,7 @@ import { runIQSE, IQSEResult, IrtTargetProfile } from '../lib/iqse';
 import { getStoredAiConfig } from '../lib/aiClient';
 import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset } from '../lib/db';
 import { syncMockHistoryToSupabase } from '../lib/supabaseClient';
+import { GenerationProgressModal } from './GenerationProgressModal';
 import {
   Sparkles,
   Layers,
@@ -955,59 +956,16 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
       )}
 
       {/* Interactive Processing Overlay for IQSE Test Paper Generation */}
-      {isGenerating && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#0e1230] border border-blue-500/50 p-7 rounded-3xl shadow-2xl max-w-md w-full space-y-5 text-center relative overflow-hidden animate-in fade-in zoom-in-95">
-            {/* Animated glowing pulse background */}
-            <div className="absolute -top-12 -left-12 w-32 h-32 bg-blue-600/20 rounded-full blur-2xl animate-pulse" />
-            <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-purple-600/20 rounded-full blur-2xl animate-pulse" />
-
-            <div className="relative flex flex-col items-center space-y-3">
-              <div className="relative">
-                <div className="w-16 h-16 rounded-full border-4 border-blue-500/20 border-t-blue-500 border-r-purple-500 animate-spin" />
-                <Sparkles className="w-7 h-7 text-blue-400 absolute inset-0 m-auto animate-pulse" />
-              </div>
-
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center justify-center space-x-2">
-                  <span>IQSE 3-Engine Processing...</span>
-                </h3>
-                <p className="text-xs text-blue-300 font-medium mt-1">
-                  Generating "{testName}" ({sections.reduce((a, b) => a + b.questionCount, 0)} MCQs)
-                </p>
-              </div>
-            </div>
-
-            {/* Interactive Progress Steps Animation */}
-            <div className="space-y-2 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800 text-left text-xs">
-              <div className="flex items-center space-x-2 text-blue-400">
-                <CheckCircle2 className="w-4 h-4 text-blue-400 animate-pulse flex-shrink-0" />
-                <span>1. Scanning Question Bank ({questions.length} Total Questions)...</span>
-              </div>
-              <div className="flex items-center space-x-2 text-indigo-300">
-                <Zap className="w-4 h-4 text-indigo-400 animate-bounce flex-shrink-0" />
-                <span>2. Executing DUXQE Mutation & DU-RIR Vector Analysis...</span>
-              </div>
-              <div className="flex items-center space-x-2 text-purple-300">
-                <Target className="w-4 h-4 text-purple-400 animate-pulse flex-shrink-0" />
-                <span>3. IRT Difficulty Curve Balancing ({irtProfile} profile)...</span>
-              </div>
-              <div className="flex items-center space-x-2 text-emerald-400">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>4. Assembling Section-wise Paper & Uniqueness Score...</span>
-              </div>
-            </div>
-
-            <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
-              <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 animate-pulse rounded-full w-full" />
-            </div>
-
-            <p className="text-[10px] text-slate-400 italic">
-              Please wait... AI and algorithms are selecting optimum non-repetitive MCQs.
-            </p>
-          </div>
-        </div>
-      )}
+      <GenerationProgressModal
+        isOpen={isGenerating}
+        testName={testName}
+        totalQuestions={sections.reduce((a, b) => a + (Number(b.questionCount) || 0), 0)}
+        sectionsCount={sections.length}
+        totalBankQuestions={questions.length}
+        uniqueThreshold={uniqueThreshold}
+        irtProfile={irtProfile}
+        enableDUXQE={enableDUXQE}
+      />
 
       {/* Modal: Save Current Exam Setup as Blueprint / Preset */}
       {isSavePresetModalOpen && (
