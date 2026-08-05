@@ -342,6 +342,9 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
     setIsGenerating(true);
     setIqseResult(null);
 
+    // CRITICAL: Force yield execution to the browser event loop so React paints the GenerationProgressModal modal BEFORE heavy processing begins (even when DU-XQE is OFF)
+    await new Promise(resolve => setTimeout(resolve, 200));
+
     const mockId = Date.now();
     const activeAiConfig = getStoredAiConfig();
     const startTime = Date.now();

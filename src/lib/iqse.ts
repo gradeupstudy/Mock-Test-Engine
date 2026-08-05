@@ -309,6 +309,9 @@ export async function runIQSE(
     recentMockQuestionVectors.push(extractNgramVector(q.question));
   });
 
+  // Yield execution to UI thread
+  await new Promise(r => setTimeout(r, 40));
+
   // Pre-calculate vectors for all questions in pool
   const questionVectorMap = new Map<number, Set<string>>();
   uniqueInputQuestions.forEach(q => {
@@ -328,6 +331,9 @@ export async function runIQSE(
 
   while (attempts < maxAttempts) {
     attempts++;
+    // Yield event loop between attempt iterations so progress bar & animations stay silky smooth
+    await new Promise(r => setTimeout(r, 30));
+
     const selectedThisAttempt: Question[] = [];
     const usedSimilarityGroups = new Set<number>();
     const selectedKeysThisSession = new Set<string>();
