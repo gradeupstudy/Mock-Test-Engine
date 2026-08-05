@@ -344,6 +344,7 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
 
     const mockId = Date.now();
     const activeAiConfig = getStoredAiConfig();
+    const startTime = Date.now();
 
     try {
       const result = await runIQSE(questions, sections, mockHistory, {
@@ -355,6 +356,13 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
         semanticDeduplicationThreshold: semanticThreshold,
         irtProfile
       });
+
+      // Ensure processing animation modal displays for at least 2.2 seconds so user sees full stage animation even if DU-XQE is OFF
+      const minAnimationMs = 2200;
+      const elapsedTime = Date.now() - startTime;
+      if (elapsedTime < minAnimationMs) {
+        await new Promise(resolve => setTimeout(resolve, minAnimationMs - elapsedTime));
+      }
 
       setIqseResult(result);
 

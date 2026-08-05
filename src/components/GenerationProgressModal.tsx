@@ -96,9 +96,9 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
     // Step progression interval
     const interval = setInterval(() => {
       setProgress(prev => {
-        if (prev >= 95) return 95;
-        const next = prev + Math.floor(Math.random() * 8) + 3;
-        const capped = Math.min(next, 95);
+        if (prev >= 98) return 98;
+        const next = prev + Math.floor(Math.random() * 8) + 9;
+        const capped = Math.min(next, 98);
         
         // Update active step index based on progress
         const stepIdx = Math.min(
@@ -115,7 +115,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
 
         return capped;
       });
-    }, 280);
+    }, 200);
 
     return () => clearInterval(interval);
   }, [isOpen, totalBankQuestions, steps.length]);
