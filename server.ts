@@ -857,16 +857,16 @@ async function callTavilyExplain(apiKey: string, questions: any[]): Promise<any[
     const isMathReasoning = isMathOrReasoningSubjectServer(q.subject, q.chapter);
     const subLower = (q.subject || "").toLowerCase();
 
-    let langInstruction = "Provide a step-by-step educational explanation in DUAL LANGUAGE (English & Hindi). Format:\nEnglish: <explanation in English>\nहिंदी: <व्याख्या हिंदी में>";
+    let langInstruction = "Provide a comprehensive, detailed step-by-step educational explanation in DUAL LANGUAGE (English & Hindi). Format:\nEnglish: <Detailed step-by-step explanation in English>\nहिंदी: <विस्तृत चरण-दर-चरण व्याख्या हिंदी में>";
     if (isLang) {
       if (subLower.includes("hindi") || subLower.includes("हिन्दी")) {
-        langInstruction = "Provide detailed step-by-step explanation strictly in HINDI.";
+        langInstruction = "Provide comprehensive, detailed step-by-step explanation strictly in HINDI.";
       } else {
-        langInstruction = "Provide detailed step-by-step explanation strictly in ENGLISH.";
+        langInstruction = "Provide comprehensive, detailed step-by-step explanation strictly in ENGLISH.";
       }
     }
     if (isMathReasoning) {
-      langInstruction += " MANDATE FOR MATH/REASONING: DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead so '।' is not misread as number '1'.";
+      langInstruction += " MANDATE FOR MATH/REASONING: Provide full step-by-step mathematical calculation, formula, given values, and working steps. DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead.";
     }
 
     const optA = q.optionA || q.options?.A || "";
@@ -874,10 +874,11 @@ async function callTavilyExplain(apiKey: string, questions: any[]): Promise<any[
     const optC = q.optionC || q.options?.C || "";
     const optD = q.optionD || q.options?.D || "";
     const ansLetter = q.answer || "A";
+    const optVal = ansLetter === 'A' ? optA : ansLetter === 'B' ? optB : ansLetter === 'C' ? optC : optD;
 
     const query = `MCQ Question: ${q.question}
 Options: (A) ${optA} (B) ${optB} (C) ${optC} (D) ${optD}
-Correct Answer: Option ${ansLetter}
+Correct Answer: Option ${ansLetter} (${optVal})
 Subject: ${q.subject || "General Studies"} Chapter: ${q.chapter || ""}
 Instruction: ${langInstruction}`;
 
@@ -890,7 +891,7 @@ Instruction: ${langInstruction}`;
           query,
           search_depth: "advanced",
           include_answer: true,
-          max_results: 3
+          max_results: 5
         })
       });
 
@@ -900,14 +901,28 @@ Instruction: ${langInstruction}`;
       }
 
       const data = await res.json();
-      let explanationText = data.answer || "";
+      const ansStr = (data.answer || "").trim();
+      const resultsContent = Array.isArray(data.results)
+        ? data.results.map((r: any) => r.content).filter(Boolean).join("\n\n")
+        : "";
 
-      if (!explanationText && Array.isArray(data.results) && data.results.length > 0) {
-        explanationText = data.results.map((r: any) => r.content).filter(Boolean).join("\n").slice(0, 600);
+      let rawExplanationText = "";
+      if (ansStr && resultsContent) {
+        rawExplanationText = `${ansStr}\n\n${resultsContent}`;
+      } else {
+        rawExplanationText = ansStr || resultsContent;
       }
 
-      if (!explanationText || explanationText.trim().length < 15) {
+      if (!rawExplanationText || rawExplanationText.trim().length < 10) {
         throw new Error("Tavily search returned no valid explanation text.");
+      }
+
+      let explanationText = rawExplanationText.trim();
+
+      if (isMathReasoning) {
+        if (!/step|चरण|given|दिया|formula|सूत्र|calculation|गणना/i.test(explanationText)) {
+          explanationText = `Given Data & Concept (दिया गया मान एवं सूत्र):\n- Question: ${q.question}\n- Correct Option: Option ${ansLetter} (${optVal})\n\nStep 1: Step-by-Step Solution & Working (चरण 1: विस्तृत हल एवं मान रखना):\n${rawExplanationText}\n\nStep 2: Conclusion (चरण 2: निष्कर्ष):\nTherefore, Option ${ansLetter} (${optVal}) is the correct answer.`;
+        }
       }
 
       const finalFormatted = await ensureDualLanguageExplanationServer(explanationText, q.subject, q.chapter);
@@ -1569,7 +1584,7 @@ app.post("/api/gemini/explain", async (req, res) => {
     return res.status(400).json({ error: "No questions provided for explanation generation" });
   }
 
-  // 1. Prioritize Tavily Search API for Explanation Generation when Tavily Key is available
+  // Extract Tavily Key
   let tavilyKey = req.body.tavilyApiKey || process.env.TAVILY_API_KEY || "";
   if (!tavilyKey && typeof req.body.apiKey === "string") {
     const foundTv = req.body.apiKey.split(/[\n,;\s]+/).find((k: string) => k.trim().startsWith("tvly-"));
@@ -1590,9 +1605,12 @@ app.post("/api/gemini/explain", async (req, res) => {
     }
   }
 
-  if (tavilyKey || provider === "tavily") {
+  // 1. Tavily Search API Engine (ONLY if provider is explicitly 'tavily' or primary key is a Tavily key)
+  const isTavilyPrimary = provider === "tavily" || (typeof apiKey === "string" && apiKey.trim().startsWith("tvly-"));
+
+  if (isTavilyPrimary && tavilyKey) {
     try {
-      console.log("[AI Explain 1st Preference] Executing Question Explanation via Tavily Search AI Engine...");
+      console.log("[AI Explain] Executing Question Explanation via Tavily Search Engine...");
       const tavilyExplanations = await callTavilyExplain(tavilyKey, questions);
       if (tavilyExplanations && tavilyExplanations.length > 0) {
         return res.json({ success: true, explanations: tavilyExplanations, providerUsed: "tavily" });
@@ -1602,7 +1620,7 @@ app.post("/api/gemini/explain", async (req, res) => {
     }
   }
 
-  // 2. Gemini / Groq / Secondary AI Fallback for Explanations
+  // 2. Gemini / Groq / Primary AI Engine for Explanations
   try {
     const formattedQuestions = questions.map((q: any, idx: number) => {
       const isLang = isLangSubject(q.subject, q.chapter);
@@ -1626,33 +1644,42 @@ app.post("/api/gemini/explain", async (req, res) => {
       };
     });
 
-    const prompt = `Generate a clear, accurate, step-by-step educational explanation for each MCQ below explaining why the specified correct answer is right.
+    const prompt = `Generate a comprehensive, clear, accurate, step-by-step educational explanation for each MCQ below explaining why the specified correct answer is right.
 
-CRITICAL EXPLANATION LANGUAGE MANDATE:
-1. LANGUAGE SUBJECTS EXEMPTION:
-   - If "isLanguageSubject" is true AND the subject is "English" / "English Grammar", generate explanation strictly in ENGLISH ONLY.
-   - If "isLanguageSubject" is true AND the subject is "Hindi" / "General Hindi", generate explanation strictly in HINDI ONLY.
+CRITICAL EXPLANATION QUALITY & MATHEMATICAL SOLUTION MANDATES:
+1. MANDATORY STEP-BY-STEP SOLUTION FOR MATHEMATICS & REASONING (where "isMathOrReasoning" is true or subject is Mathematics, Quantitative Aptitude, Reasoning, Arithmetic, Algebra, Geometry, Statistics, Physics numericals):
+   Every Math and Reasoning question MUST be answered with a DETAILED STEP-BY-STEP MATHEMATICAL SOLUTION.
+   Required structure for Math/Reasoning explanations:
+   - **Given Data & Formula / Concept (दिया गया मान एवं सूत्र)**: Clearly list given values from the question and the formula or rule used.
+   - **Step 1: Substitution & Calculation (चरण 1: मान रखना एवं विस्तृत हल)**: Show the step-by-step substitution of values into the formula and full calculation.
+   - **Step 2: Simplification (चरण 2: सरलीकरण)**: Show intermediate calculation steps to arrive at the solution.
+   - **Final Answer (अंतिम उत्तर एवं निष्कर्ष)**: Explicitly state the final result matching Option (A/B/C/D).
+   NEVER output a short 1-sentence answer for Math or Reasoning questions! Full mathematical working steps are REQUIRED.
 
-2. FOR ALL OTHER SECTIONS & SUBJECTS (e.g., Mathematics, Reasoning, Science, General Knowledge / GS, Computer, Himachal Pradesh GK, History, Geography, Polity, Physics, Chemistry, Biology, Economics, Pedagogy, etc. or where "isLanguageSubject" is false):
-   You MUST generate a DUAL LANGUAGE (Bilingual: BOTH English AND Hindi) explanation for EVERY single question!
+2. MANDATORY DETAILED EXPLANATION FOR ALL OTHER SUBJECTS (GS, Science, History, Geography, Polity, Computer, HP GK, etc.):
+   Explanations must be thorough, educational, and comprehensive (at least 3-5 detailed sentences per language section).
+   Explain:
+   a) The core concept / definition / historical context.
+   b) Step-by-step logical reasoning why the specified correct option is right.
+   c) Context on why other options are incorrect or inapplicable.
+   NEVER output brief, truncated, or superficial 1-sentence explanations!
 
-   REQUIRED DUAL LANGUAGE FORMAT:
-   Each "explanation" string MUST include BOTH the English explanation paragraph AND the Hindi explanation paragraph, formatted like this:
+3. DUAL LANGUAGE (BILINGUAL) FORMAT:
+   For all subjects/sections (except pure English or pure Hindi language/grammar tests where "isLanguageSubject" is true):
+   Each explanation string MUST include BOTH the English explanation paragraph AND the Hindi explanation paragraph:
 
    English: <Detailed step-by-step explanation in English detailing why the option is correct>
    हिंदी: <विस्तृत व्याख्या हिंदी में कि यह विकल्प क्यों सही है>
 
-   DO NOT output only English or only Hindi for non-language subjects. BOTH English and Hindi sections are MANDATORY in every explanation string!
-
-3. CRITICAL MANDATE FOR MATHEMATICS & REASONING SUBJECTS (where "isMathOrReasoning" is true or subject is Math/Reasoning/Aptitude):
-   In the Hindi explanation text for Mathematics and Reasoning topics, DO NOT USE the Hindi Purna Viram symbol ('।'). Use standard full stop ('.') or newline instead at sentence ends. NEVER output '।' in Hindi math explanations because '।' is mistakenly misread as the number '1' in numerical expressions!
+4. HINDI PURNA VIRAM ('।') RESTRICTION FOR MATH:
+   In Hindi text for Math & Reasoning topics, DO NOT use Hindi Purna Viram symbol ('।') at sentence ends; use standard full stop ('.') instead so '।' is not misread as number '1'.
 
 Questions:
 ${JSON.stringify(formattedQuestions, null, 2)}
 
 Return response strictly as a JSON array where each object has keys: "index", "idTemp" or "id", and "explanation".`;
 
-    const systemInstruction = "You are an expert bilingual educational tutor. MANDATE: For all subjects/sections except pure English or Hindi language sections, you MUST generate step-by-step explanations in DUAL LANGUAGE (Bilingual: English + Hindi). Every explanation string MUST contain BOTH an English section ('English: ...') and a Hindi section ('हिंदी: ...'). For Math/Reasoning, DO NOT use Hindi Purna Viram ('।') at sentence ends; use standard full stop ('.') instead.";
+    const systemInstruction = "You are an expert educational tutor and master mathematician. MANDATE: For Math and Reasoning questions, you MUST provide full step-by-step mathematical solutions with Given Data, Step 1 Calculation, Step 2 Simplification, and Final Answer. For all non-language subjects, generate thorough explanations in DUAL LANGUAGE (Bilingual: English + Hindi). Short 1-sentence explanations are STRICTLY FORBIDDEN.";
 
     const text = await executeAiCallServer(req.body, prompt, systemInstruction);
     const parsed = cleanAndParseJson(text);

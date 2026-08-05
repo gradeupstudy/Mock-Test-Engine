@@ -998,16 +998,16 @@ export async function callTavilyExplainClient(
     const isMathReasoning = isMathOrReasoningSubject(q.subject, q.chapter);
     const subLower = (q.subject || '').toLowerCase();
 
-    let langInstruction = 'Provide a step-by-step educational explanation in DUAL LANGUAGE (English & Hindi). Format:\nEnglish: <explanation in English>\nहिंदी: <व्याख्या हिंदी में>';
+    let langInstruction = 'Provide a comprehensive, detailed step-by-step educational explanation in DUAL LANGUAGE (English & Hindi). Format:\nEnglish: <Detailed step-by-step explanation in English>\nहिंदी: <विस्तृत चरण-दर-चरण व्याख्या हिंदी में>';
     if (isLang) {
       if (subLower.includes('hindi') || subLower.includes('हिन्दी')) {
-        langInstruction = 'Provide detailed step-by-step explanation strictly in HINDI.';
+        langInstruction = 'Provide comprehensive, detailed step-by-step explanation strictly in HINDI.';
       } else {
-        langInstruction = 'Provide detailed step-by-step explanation strictly in ENGLISH.';
+        langInstruction = 'Provide comprehensive, detailed step-by-step explanation strictly in ENGLISH.';
       }
     }
     if (isMathReasoning) {
-      langInstruction += " MANDATE FOR MATH/REASONING: DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead so '।' is not misread as number '1'.";
+      langInstruction += " MANDATE FOR MATH/REASONING: Provide full step-by-step mathematical calculation, formula, given values, and working steps. DO NOT use Hindi Purna Viram ('।') symbol at sentence ends in Hindi text; use standard full stop ('.') instead.";
     }
 
     const optA = q.optionA || (q as any).options?.A || '';
@@ -1015,10 +1015,11 @@ export async function callTavilyExplainClient(
     const optC = q.optionC || (q as any).options?.C || '';
     const optD = q.optionD || (q as any).options?.D || '';
     const ansLetter = q.answer || 'A';
+    const optVal = ansLetter === 'A' ? optA : ansLetter === 'B' ? optB : ansLetter === 'C' ? optC : optD;
 
     const query = `MCQ Question: ${q.question}
 Options: (A) ${optA} (B) ${optB} (C) ${optC} (D) ${optD}
-Correct Answer: Option ${ansLetter}
+Correct Answer: Option ${ansLetter} (${optVal})
 Subject: ${q.subject || 'General Studies'} Chapter: ${q.chapter || ''}
 Instruction: ${langInstruction}`;
 
@@ -1031,7 +1032,7 @@ Instruction: ${langInstruction}`;
           query,
           search_depth: 'advanced',
           include_answer: true,
-          max_results: 3
+          max_results: 5
         })
       });
 
@@ -1041,14 +1042,28 @@ Instruction: ${langInstruction}`;
       }
 
       const data = await res.json();
-      let explanationText = data.answer || '';
+      const ansStr = (data.answer || '').trim();
+      const resultsContent = Array.isArray(data.results)
+        ? data.results.map((r: any) => r.content).filter(Boolean).join('\n\n')
+        : '';
 
-      if (!explanationText && Array.isArray(data.results) && data.results.length > 0) {
-        explanationText = data.results.map((r: any) => r.content).filter(Boolean).join('\n\n').slice(0, 800);
+      let rawExplanationText = '';
+      if (ansStr && resultsContent) {
+        rawExplanationText = `${ansStr}\n\n${resultsContent}`;
+      } else {
+        rawExplanationText = ansStr || resultsContent;
       }
 
-      if (!explanationText || explanationText.trim().length < 15) {
+      if (!rawExplanationText || rawExplanationText.trim().length < 10) {
         throw new Error('Tavily search returned no valid explanation text.');
+      }
+
+      let explanationText = rawExplanationText.trim();
+
+      if (isMathReasoning) {
+        if (!/step|चरण|given|दिया|formula|सूत्र|calculation|गणना/i.test(explanationText)) {
+          explanationText = `Given Data & Concept (दिया गया मान एवं सूत्र):\n- Question: ${q.question}\n- Correct Option: Option ${ansLetter} (${optVal})\n\nStep 1: Step-by-Step Solution & Working (चरण 1: विस्तृत हल एवं मान रखना):\n${rawExplanationText}\n\nStep 2: Conclusion (चरण 2: निष्कर्ष):\nTherefore, Option ${ansLetter} (${optVal}) is the correct answer.`;
+        }
       }
 
       const finalFormatted = await formatDualLanguageExplanation(explanationText, q.subject, q.chapter);
@@ -1070,7 +1085,7 @@ Instruction: ${langInstruction}`;
   return explanations;
 }
 
-// 2. Generate Explanations for Questions (Tavily 1st Preference Engine + Quota Failover)
+// 2. Generate Explanations for Questions (Tavily Search + Primary AI Fallback)
 export async function callAiExplain(
   questions: QuestionInput[],
   config?: AiConfig
@@ -1082,10 +1097,12 @@ export async function callAiExplain(
     (activeConfig.apiKey && activeConfig.apiKey.startsWith('tvly-') ? activeConfig.apiKey : '') ||
     (activeConfig.apiKeysList || []).find(k => typeof k === 'string' && k.startsWith('tvly-')) || '';
 
-  // 1. TAVILY 1st PREFERENCE: If Tavily key exists or provider is 'tavily', run Tavily Search AI Engine FIRST
-  if (tavilyKey || activeConfig.provider === 'tavily') {
+  const isTavilyPrimary = activeConfig.provider === 'tavily' || (typeof activeConfig.apiKey === 'string' && activeConfig.apiKey.startsWith('tvly-'));
+
+  // 1. TAVILY SEARCH ENGINE (ONLY if provider is explicitly 'tavily' or key is tvly-)
+  if (isTavilyPrimary && tavilyKey) {
     try {
-      console.log('[callAiExplain] Prioritizing Tavily Search API as 1st Engine for Explanation Generation...');
+      console.log('[callAiExplain] Executing Tavily Search API Engine for Explanation Generation...');
       // A. Try server Tavily execution first
       const serverResult = await safeFetchJson('/api/gemini/explain', {
         method: 'POST',
@@ -1136,7 +1153,7 @@ export async function callAiExplain(
         }
       }
     } catch (tavErr: any) {
-      console.warn('[callAiExplain] Tavily 1st Preference Engine Warning, falling back to Gemini/Groq:', tavErr.message);
+      console.warn('[callAiExplain] Tavily Engine Warning, falling back to Gemini/Groq:', tavErr.message);
     }
   }
 
