@@ -132,3 +132,32 @@ export function formatMathSymbols(text: string): string {
 
   return res;
 }
+
+/**
+ * Formats solution / explanation text into well-spaced step-by-step lines.
+ * Ensures headers like "Given & Concept", "Step 1", "Final Answer", "English:", "हिंदी:"
+ * always start on fresh lines with proper line breaks so they don't run together in a horizontal block.
+ */
+export function formatStepByStepExplanation(text: string): string {
+  if (!text || typeof text !== 'string') return text || '';
+  let str = text.trim();
+
+  // 1. Ensure headings have newlines before them if glued together
+  const headingRegex = /(\*\*?(?:Given|Step \d+|चरण \d+|Final Answer|अंतिम उत्तर|English|हिंदी|हिन्दी|Formula|Calculation|Solution|हल|व्याख्या|Concept|दिया गया)[^\*\n:]*:\*\*?|\b(?:Given & Concept|Given Data|Step \d+:[^\n]*|Final Answer:|English:|हिंदी:|हिन्दी:))/gi;
+
+  str = str.replace(headingRegex, (match, offset) => {
+    if (offset === 0) return match;
+    return `\n\n${match}`;
+  });
+
+  // 2. Ensure "English:" and "हिंदी:" start on fresh separate lines
+  str = str.replace(/([^\n])\s*(English:|हिंदी:|हिन्दी:)/gi, '$1\n\n$2');
+
+  // 3. Ensure step working steps like "Step 1:", "Step 2:", "चरण 1:" start on fresh lines
+  str = str.replace(/([^\n])\s*(\bStep \d+:|\bचरण \d+:)/gi, '$1\n\n$2');
+
+  // 4. Collapse 3+ newlines into double newlines
+  str = str.replace(/\n{3,}/g, '\n\n');
+
+  return str.trim();
+}

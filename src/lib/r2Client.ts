@@ -1,5 +1,6 @@
 import { gzip, ungzip } from 'pako';
 import { Question, MockHistory } from '../types';
+import { generateBackupFilename } from './supabaseClient';
 
 const STORAGE_KEY_R2_ACCOUNT_ID = 'gradeup_r2_account_id';
 const STORAGE_KEY_R2_ACCESS_KEY_ID = 'gradeup_r2_access_key_id';
@@ -212,7 +213,7 @@ export async function uploadBackupToR2Bucket(
     return { success: false, fileName, error: 'Cloudflare R2 credentials missing. Please configure credentials first.' };
   }
 
-  let finalFileName = fileName.trim() || `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+  let finalFileName = fileName.trim() || generateBackupFilename('Gradeup_Study_Backup', compressGzip ? 'json.gz' : 'json');
 
   let payloadBase64: string;
   let contentType: string;

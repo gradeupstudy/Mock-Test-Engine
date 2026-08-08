@@ -1674,10 +1674,11 @@ CRITICAL LENGTH, QUALITY & MATHEMATICAL SOLUTION MANDATES:
 
 2. STEP-BY-STEP SOLUTION FOR MATHEMATICS & REASONING (where "isMathOrReasoning" is true or subject is Math/Reasoning/Aptitude):
    Every Math and Reasoning question MUST be answered with a clear, simple step-by-step mathematical solution that a student can easily follow:
+   - MANDATORY LINE BREAKS: Use distinct newlines (\n\n) between each step section so steps are NOT merged together!
    - **Given & Concept (दिया गया मान एवं सूत्र)**: List given values and formula used.
    - **Step 1: Working & Calculation (चरण 1: हल एवं गणना)**: Show step-by-step working clearly.
    - **Final Answer (अंतिम उत्तर)**: State the correct option.
-   Keep it concise, clear, and UNDER 200 WORDS TOTAL!
+   Keep it concise, clear, well-spaced, and UNDER 200 WORDS TOTAL!
 
 3. DUAL LANGUAGE (BILINGUAL) FORMAT:
    For all subjects/sections (except pure English or pure Hindi language/grammar tests where "isLanguageSubject" is true):

@@ -1627,12 +1627,12 @@ Return ONLY valid JSON matching this schema:
                   />
 
                   {q.explanation && (
-                    <div className="p-3 bg-purple-950/40 border border-purple-800/60 rounded-xl space-y-1">
-                      <div className="text-[10px] font-bold text-purple-300 tracking-wider uppercase flex items-center space-x-1">
-                        <Sparkles className="w-3 h-3 text-purple-400" />
-                        <span>Formatted Solution / Explanation Preview:</span>
+                    <div className="p-3 bg-purple-950/50 border border-purple-800/60 rounded-xl space-y-2 mt-2">
+                      <div className="text-[11px] font-bold text-purple-300 tracking-wider uppercase flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                        <span>FORMATTED SOLUTION / EXPLANATION PREVIEW:</span>
                       </div>
-                      <div className="text-xs text-purple-100 leading-relaxed font-sans">
+                      <div className="text-xs text-purple-100 leading-relaxed font-sans bg-slate-950/80 p-3 rounded-lg border border-purple-900/50 shadow-inner">
                         <MathText text={q.explanation} />
                       </div>
                     </div>
@@ -2057,12 +2057,12 @@ Return ONLY valid JSON matching this schema:
                 />
 
                 {questions[editingModalIndex].explanation && (
-                  <div className="p-3 bg-purple-950/60 border border-purple-800 rounded-xl space-y-1">
-                    <div className="text-[10px] font-bold text-purple-300 tracking-wider uppercase flex items-center space-x-1">
+                  <div className="p-3 bg-purple-950/60 border border-purple-800 rounded-xl space-y-2 mt-2">
+                    <div className="text-[11px] font-bold text-purple-300 tracking-wider uppercase flex items-center space-x-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-purple-400" />
                       <span>Live Formatted Math Preview:</span>
                     </div>
-                    <div className="text-xs text-purple-100 leading-relaxed font-sans">
+                    <div className="text-xs text-purple-100 leading-relaxed font-sans bg-slate-950/80 p-3 rounded-lg border border-purple-900/50 shadow-inner">
                       <MathText text={questions[editingModalIndex].explanation || ''} />
                     </div>
                   </div>

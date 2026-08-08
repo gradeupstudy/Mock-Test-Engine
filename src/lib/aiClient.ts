@@ -1,4 +1,5 @@
 import { AiConfig, AiProvider, Question, DifficultyLevel } from '../types';
+import { formatStepByStepExplanation } from './mathUtils';
 
 const STORAGE_KEY = 'gradeup_ai_config';
 
@@ -930,20 +931,33 @@ export async function translateTextToEnglish(text: string): Promise<string> {
 
 export function trimToMaxWords(text: string, maxWords: number = 200): string {
   if (!text || !text.trim()) return '';
-  const words = text.trim().split(/\s+/);
-  if (words.length <= maxWords) return text.trim();
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/);
+  if (words.length <= maxWords) return trimmed;
 
-  const truncatedWords = words.slice(0, maxWords).join(' ');
-  const lastPunct = Math.max(
-    truncatedWords.lastIndexOf('.'),
-    truncatedWords.lastIndexOf('!'),
-    truncatedWords.lastIndexOf('?'),
-    truncatedWords.lastIndexOf('\n')
-  );
-  if (lastPunct > truncatedWords.length * 0.6) {
-    return truncatedWords.slice(0, lastPunct + 1).trim();
+  let count = 0;
+  const lines = trimmed.split('\n');
+  const resultLines: string[] = [];
+
+  for (const line of lines) {
+    const lineWords = line.trim().split(/\s+/).filter(Boolean);
+    if (lineWords.length === 0) {
+      resultLines.push('');
+      continue;
+    }
+    if (count + lineWords.length <= maxWords) {
+      resultLines.push(line);
+      count += lineWords.length;
+    } else {
+      const needed = maxWords - count;
+      if (needed > 0) {
+        resultLines.push(lineWords.slice(0, needed).join(' ') + '...');
+      }
+      break;
+    }
   }
-  return truncatedWords.trim() + '.';
+
+  return resultLines.join('\n').trim();
 }
 
 export async function formatDualLanguageExplanation(
@@ -952,7 +966,8 @@ export async function formatDualLanguageExplanation(
   chapter?: string
 ): Promise<string> {
   if (!rawExp || !rawExp.trim()) return '';
-  const trimmed = trimToMaxWords(rawExp.trim(), 160);
+  const formattedSteps = formatStepByStepExplanation(rawExp.trim());
+  const trimmed = trimToMaxWords(formattedSteps, 180);
 
   const isLang = isLanguageGrammarVocabQuestion({ subject, chapter });
 
@@ -964,9 +979,9 @@ export async function formatDualLanguageExplanation(
     // If it's a Hindi language subject but explanation is in English, translate to Hindi
     if (isHindiLang && !/[\u0900-\u097F]/.test(trimmed)) {
       const hiTrans = await translateTextToHindi(trimmed);
-      return trimToMaxWords(hiTrans || trimmed, 200);
+      return formatStepByStepExplanation(trimToMaxWords(hiTrans || trimmed, 200));
     }
-    return trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200);
+    return formatStepByStepExplanation(trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200));
   }
 
   // FOR ALL OTHER SECTIONS & SUBJECTS: MUST BE DUAL LANGUAGE (English & Hindi)
@@ -975,32 +990,32 @@ export async function formatDualLanguageExplanation(
 
   // If it already has both English and Hindi text, just clean math purna viram and cap at 200 words
   if (hasEnglish && hasHindi) {
-    return trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200);
+    return formatStepByStepExplanation(trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200));
   }
 
   // If it is English only (typical Tavily response), translate to Hindi & combine
   if (hasEnglish && !hasHindi) {
-    const shortEng = trimToMaxWords(trimmed, 80);
+    const shortEng = trimToMaxWords(trimmed, 90);
     let hindiTranslation = await translateTextToHindi(shortEng);
     if (hindiTranslation) {
-      hindiTranslation = cleanPurnaViramForMathReasoning(trimToMaxWords(hindiTranslation, 80), subject, chapter);
-      return trimToMaxWords(`English: ${shortEng}\n\nहिंदी: ${hindiTranslation}`, 200);
+      hindiTranslation = cleanPurnaViramForMathReasoning(trimToMaxWords(hindiTranslation, 90), subject, chapter);
+      return formatStepByStepExplanation(trimToMaxWords(`English: ${shortEng}\n\nहिंदी: ${hindiTranslation}`, 200));
     }
-    return trimToMaxWords(cleanPurnaViramForMathReasoning(shortEng, subject, chapter), 200);
+    return formatStepByStepExplanation(trimToMaxWords(cleanPurnaViramForMathReasoning(shortEng, subject, chapter), 200));
   }
 
   // If it is Hindi only, translate to English & combine
   if (hasHindi && !hasEnglish) {
-    const shortHi = trimToMaxWords(trimmed, 80);
+    const shortHi = trimToMaxWords(trimmed, 90);
     let englishTranslation = await translateTextToEnglish(shortHi);
     const cleanedHindi = cleanPurnaViramForMathReasoning(shortHi, subject, chapter);
     if (englishTranslation) {
-      return trimToMaxWords(`English: ${trimToMaxWords(englishTranslation, 80)}\n\nहिंदी: ${cleanedHindi}`, 200);
+      return formatStepByStepExplanation(trimToMaxWords(`English: ${trimToMaxWords(englishTranslation, 90)}\n\nहिंदी: ${cleanedHindi}`, 200));
     }
-    return trimToMaxWords(cleanedHindi, 200);
+    return formatStepByStepExplanation(trimToMaxWords(cleanedHindi, 200));
   }
 
-  return trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200);
+  return formatStepByStepExplanation(trimToMaxWords(cleanPurnaViramForMathReasoning(trimmed, subject, chapter), 200));
 }
 
 // Dedicated Client Tavily Search API Explanation Generator

@@ -29,6 +29,7 @@ import {
   CloudflareR2File,
   CloudflareR2Config
 } from '../lib/r2Client';
+import { generateBackupFilename } from '../lib/supabaseClient';
 import { Question, MockHistory } from '../types';
 import { addQuestionsBatch, replaceAllQuestions, addMocksBatch, replaceAllMocks } from '../lib/db';
 
@@ -75,7 +76,7 @@ export const CloudflareR2Modal: React.FC<CloudflareR2ModalProps> = ({
       setBucketName(config.bucketName || 'backups');
       setCustomDomain(config.customDomain || '');
       setStatusMsg(null);
-      setCustomFilename(`Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`);
+      setCustomFilename(generateBackupFilename('Gradeup_Study_Backup', 'json.gz'));
 
       if (config.accountId && config.accessKeyId && config.secretAccessKey) {
         loadBucketFiles(config.bucketName || 'backups');
@@ -157,7 +158,7 @@ export const CloudflareR2Modal: React.FC<CloudflareR2ModalProps> = ({
       mockHistory
     };
 
-    const fileName = customFilename.trim() || `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`;
+    const fileName = customFilename.trim() || generateBackupFilename('Gradeup_Study_Backup', useGzip ? 'json.gz' : 'json');
     const res = await uploadBackupToR2Bucket(backupPayload, fileName, bucketName, useGzip);
     setIsSaving(false);
 
@@ -172,6 +173,8 @@ export const CloudflareR2Modal: React.FC<CloudflareR2ModalProps> = ({
         text: `⚡ Backup successfully saved to Cloudflare R2 Bucket "${bucketName}" as "${res.fileName}"!${savingsInfo} (${questions.length} MCQs & ${mockHistory.length} Mock Tests)`,
         type: 'success'
       });
+      // Generate next timestamped filename for next backup
+      setCustomFilename(generateBackupFilename('Gradeup_Study_Backup', useGzip ? 'json.gz' : 'json'));
       await loadBucketFiles(bucketName);
     } else {
       setStatusMsg({ text: `Upload Failed: ${res.error || 'Unknown error'}`, type: 'error' });

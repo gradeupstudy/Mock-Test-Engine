@@ -24,6 +24,7 @@ import {
   getStoredSupabaseBucketName,
   saveSupabaseBucketName,
   testSupabaseBucketAccess,
+  generateBackupFilename,
   uploadJsonBackupToSupabaseBucket,
   listJsonBackupsFromSupabaseBucket,
   downloadJsonBackupFromSupabaseBucket,
@@ -78,7 +79,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
       setAnonKey(config.anonKey);
       setBucketName(config.bucketName || 'backups');
       setStatusMsg(null);
-      setCustomFilename(`Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`);
+      setCustomFilename(generateBackupFilename('Gradeup_Study_Backup', 'json.gz'));
 
       if (config.url && config.anonKey) {
         loadBucketFiles(config.bucketName || 'backups');
@@ -150,7 +151,7 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
       mockHistory
     };
 
-    const fileName = customFilename.trim() || `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`;
+    const fileName = customFilename.trim() || generateBackupFilename('Gradeup_Study_Backup', useGzip ? 'json.gz' : 'json');
     const res = await uploadJsonBackupToSupabaseBucket(backupPayload, fileName, bucketName, useGzip);
     setIsSaving(false);
 
@@ -165,6 +166,8 @@ export const SupabaseStorageModal: React.FC<SupabaseStorageModalProps> = ({
         text: `⚡ Backup successfully saved to Supabase Bucket "${bucketName}" as "${res.fileName}"!${savingsInfo} (${questions.length} MCQs & ${mockHistory.length} Mock Tests)`,
         type: 'success'
       });
+      // Generate next timestamped filename for the next backup
+      setCustomFilename(generateBackupFilename('Gradeup_Study_Backup', useGzip ? 'json.gz' : 'json'));
       await loadBucketFiles(bucketName);
     } else {
       setStatusMsg({ text: `Upload Failed: ${res.error}`, type: 'error' });

@@ -19,6 +19,7 @@ import { SupabaseStorageModal } from './SupabaseStorageModal';
 import { PinModal } from './PinModal';
 import {
   getStoredSupabaseConfig,
+  generateBackupFilename,
   compressJsonToGzip,
   decompressGzipToJson,
   syncQuestionsToSupabase,
@@ -65,7 +66,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json.gz`;
+      a.download = generateBackupFilename('Gradeup_Study_Backup', 'json.gz');
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -81,7 +82,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = generateBackupFilename('Gradeup_Study_Backup', 'json');
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -106,7 +107,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Gradeup_Mock_Tests_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = generateBackupFilename('Gradeup_Mock_Tests_Backup', 'json');
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -847,6 +847,23 @@ export async function testSupabaseBucketAccess(
   }
 }
 
+/**
+ * Generates a unique timestamped backup filename (YYYY-MM-DD_HH-mm-ss)
+ * to prevent backup files from overwriting previous backups on the same date.
+ */
+export function generateBackupFilename(prefix: string = 'Gradeup_Study_Backup', ext: string = 'json.gz'): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const mins = String(now.getMinutes()).padStart(2, '0');
+  const secs = String(now.getSeconds()).padStart(2, '0');
+
+  const cleanExt = ext.startsWith('.') ? ext.slice(1) : ext;
+  return `${prefix}_${year}-${month}-${day}_${hours}-${mins}-${secs}.${cleanExt}`;
+}
+
 export async function uploadJsonBackupToSupabaseBucket(
   backupData: any,
   fileName?: string,
@@ -869,7 +886,7 @@ export async function uploadJsonBackupToSupabaseBucket(
   const bucket = customBucketName || getStoredSupabaseBucketName();
   let targetFileName = (fileName && fileName.trim())
     ? fileName.trim()
-    : `Gradeup_Study_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    : generateBackupFilename('Gradeup_Study_Backup', useGzipCompression ? 'json.gz' : 'json');
 
   try {
     let uploadBlob: Blob;
