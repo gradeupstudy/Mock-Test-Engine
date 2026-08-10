@@ -27,7 +27,10 @@ import {
   RotateCcw,
   History,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  ArrowRightLeft,
+  FolderSync,
+  MoveRight
 } from 'lucide-react';
 
 interface QuestionBankViewProps {
@@ -102,6 +105,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
 
+  // Shift Subject & Chapter Modal State
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState<boolean>(false);
+  const [shiftMode, setShiftMode] = useState<'STEP_BY_STEP_SHIFT' | 'SUBJECT_TO_SUBJECT' | 'SUBJECT_CHAPTER_TO_TARGET' | 'SELECTED_MCQS'>('STEP_BY_STEP_SHIFT');
+  const [shiftSourceSubject, setShiftSourceSubject] = useState<string>('');
+  const [shiftSourceChapter, setShiftSourceChapter] = useState<string>('');
+  const [shiftTargetSubject, setShiftTargetSubject] = useState<string>('');
+  const [shiftTargetChapter, setShiftTargetChapter] = useState<string>('');
+  const [shiftMcqSelection, setShiftMcqSelection] = useState<Set<number>>(new Set());
+
   // Form State for Add/Edit
   const [formData, setFormData] = useState<Partial<Question>>({
     subject: 'Quantitative Aptitude',
@@ -155,6 +167,313 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const duplicateStats = useMemo(() => {
     return getDuplicateStats(questions);
   }, [questions]);
+
+  // All Unique Chapters across entire Question Bank
+  const allChapters = useMemo(() => {
+    const map = new Map<string, string>();
+    questions.forEach(q => {
+      if (q.chapter && q.chapter.trim()) {
+        const trimmed = q.chapter.trim();
+        const lower = trimmed.toLowerCase();
+        if (!map.has(lower)) map.set(lower, trimmed);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [questions]);
+
+  // Chapters belonging specifically to shiftSourceSubject
+  const chaptersForSourceSubject = useMemo(() => {
+    const map = new Map<string, string>();
+    const srcSubLower = shiftSourceSubject.trim().toLowerCase();
+    questions.forEach(q => {
+      const qSubLower = (q.subject || '').trim().toLowerCase();
+      if (qSubLower === srcSubLower && q.chapter && q.chapter.trim()) {
+        const trimmed = q.chapter.trim();
+        const lower = trimmed.toLowerCase();
+        if (!map.has(lower)) map.set(lower, trimmed);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [questions, shiftSourceSubject]);
+
+  // All MCQs belonging to current source Subject & Chapter
+  const mcqsInSourceChapter = useMemo(() => {
+    const srcSubLower = shiftSourceSubject.trim().toLowerCase();
+    const srcChapLower = shiftSourceChapter.trim().toLowerCase();
+    if (!srcSubLower || !srcChapLower) return [];
+    return questions.filter(q => 
+      (q.subject || '').trim().toLowerCase() === srcSubLower &&
+      (q.chapter || '').trim().toLowerCase() === srcChapLower
+    );
+  }, [questions, shiftSourceSubject, shiftSourceChapter]);
+
+  // Shift MCQ Toggle Helpers
+  const toggleShiftMcq = (id: number) => {
+    setShiftMcqSelection(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const selectAllShiftMcqs = () => {
+    const ids = new Set(mcqsInSourceChapter.map(q => q.id!).filter(Boolean));
+    setShiftMcqSelection(ids);
+  };
+
+  const deselectAllShiftMcqs = () => {
+    setShiftMcqSelection(new Set());
+  };
+
+  // Questions matching current shift criteria
+  const shiftMatchingQuestions = useMemo(() => {
+    if (shiftMode === 'STEP_BY_STEP_SHIFT') {
+      return mcqsInSourceChapter.filter(q => shiftMcqSelection.has(q.id!));
+    }
+    if (shiftMode === 'SELECTED_MCQS') {
+      return questions.filter(q => selectedIds.has(q.id!));
+    }
+    const srcSubLower = shiftSourceSubject.trim().toLowerCase();
+    if (!srcSubLower) return [];
+
+    if (shiftMode === 'SUBJECT_TO_SUBJECT') {
+      return questions.filter(q => (q.subject || '').trim().toLowerCase() === srcSubLower);
+    }
+
+    if (shiftMode === 'SUBJECT_CHAPTER_TO_TARGET') {
+      const srcChapLower = shiftSourceChapter.trim().toLowerCase();
+      if (!srcChapLower) return [];
+      return questions.filter(q => 
+        (q.subject || '').trim().toLowerCase() === srcSubLower &&
+        (q.chapter || '').trim().toLowerCase() === srcChapLower
+      );
+    }
+
+    return [];
+  }, [questions, shiftMode, shiftSourceSubject, shiftSourceChapter, selectedIds, mcqsInSourceChapter, shiftMcqSelection]);
+
+  const openShiftModal = (mode?: 'STEP_BY_STEP_SHIFT' | 'SUBJECT_TO_SUBJECT' | 'SUBJECT_CHAPTER_TO_TARGET' | 'SELECTED_MCQS') => {
+    const defaultSub = selectedSubject !== 'ALL' ? selectedSubject : (subjects[0] || '');
+    const srcChapsMap = new Map<string, string>();
+    questions.forEach(q => {
+      if ((q.subject || '').trim().toLowerCase() === defaultSub.trim().toLowerCase() && q.chapter && q.chapter.trim()) {
+        const trimmed = q.chapter.trim();
+        const lower = trimmed.toLowerCase();
+        if (!srcChapsMap.has(lower)) srcChapsMap.set(lower, trimmed);
+      }
+    });
+    const subChaps = Array.from(srcChapsMap.values());
+    const defaultChap = selectedChapter !== 'ALL' ? selectedChapter : (subChaps[0] || '');
+
+    setShiftSourceSubject(defaultSub);
+    setShiftSourceChapter(defaultChap);
+    setShiftTargetSubject(defaultSub);
+    setShiftTargetChapter(defaultChap);
+
+    // Pre-select all MCQs in this source subject/chapter
+    const inChap = questions.filter(q => 
+      (q.subject || '').trim().toLowerCase() === defaultSub.trim().toLowerCase() &&
+      (q.chapter || '').trim().toLowerCase() === defaultChap.trim().toLowerCase()
+    );
+    setShiftMcqSelection(new Set(inChap.map(q => q.id!).filter(Boolean)));
+
+    if (mode) {
+      setShiftMode(mode);
+    } else if (selectedIds.size > 0) {
+      setShiftMode('SELECTED_MCQS');
+    } else {
+      setShiftMode('STEP_BY_STEP_SHIFT');
+    }
+
+    setIsShiftModalOpen(true);
+  };
+
+  const handleExecuteShift = async () => {
+    const targetSubClean = shiftTargetSubject.trim();
+    const targetChapClean = shiftTargetChapter.trim();
+
+    if (shiftMode === 'STEP_BY_STEP_SHIFT') {
+      if (!shiftSourceSubject.trim() || !shiftSourceChapter.trim()) {
+        alert('Step 1 & 2: Please select both a Source Subject and Source Chapter.');
+        return;
+      }
+      if (shiftMcqSelection.size === 0) {
+        alert('Step 3: Please select at least 1 MCQ from the chapter list to shift.');
+        return;
+      }
+      if (!targetSubClean) {
+        alert('Step 4: Please enter or choose a Target Subject name.');
+        return;
+      }
+
+      const finalChap = targetChapClean || shiftSourceChapter.trim();
+      const matching = shiftMatchingQuestions;
+
+      if (!confirm(`Are you sure you want to shift & paste ${matching.length} selected MCQs to Subject "${targetSubClean}" & Chapter "${finalChap}"?`)) {
+        return;
+      }
+
+      setIsAiLoading(true);
+      setAiNotice(`Shifting & pasting ${matching.length} MCQs to "${targetSubClean} / ${finalChap}"...`);
+
+      try {
+        const nowIso = new Date().toISOString();
+        const updatedList: Question[] = matching.map(q => ({
+          ...q,
+          subject: targetSubClean,
+          chapter: finalChap,
+          updatedDate: nowIso
+        }));
+
+        await onUpdateBatch(updatedList);
+        setAiNotice(`Successfully shifted and pasted ${updatedList.length} MCQs to "${targetSubClean}" / "${finalChap}"!`);
+        setIsShiftModalOpen(false);
+      } catch (err: any) {
+        setAiNotice(`Shift Error: ${err.message}`);
+      } finally {
+        setIsAiLoading(false);
+      }
+
+    } else if (shiftMode === 'SUBJECT_TO_SUBJECT') {
+      if (!shiftSourceSubject.trim()) {
+        alert('Please select a source Subject to shift.');
+        return;
+      }
+      if (!targetSubClean) {
+        alert('Please select or type a Target Subject name.');
+        return;
+      }
+      if (shiftSourceSubject.trim().toLowerCase() === targetSubClean.toLowerCase()) {
+        alert('Source Subject and Target Subject are identical. Please enter a different target subject name.');
+        return;
+      }
+
+      const matching = shiftMatchingQuestions;
+      if (matching.length === 0) {
+        alert(`No questions found in Question Bank under Subject "${shiftSourceSubject}".`);
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to shift ALL ${matching.length} questions from Subject "${shiftSourceSubject}" to "${targetSubClean}"?`)) {
+        return;
+      }
+
+      setIsAiLoading(true);
+      setAiNotice(`Shifting ${matching.length} questions to Subject "${targetSubClean}"...`);
+
+      try {
+        const nowIso = new Date().toISOString();
+        const updatedList: Question[] = matching.map(q => ({
+          ...q,
+          subject: targetSubClean,
+          updatedDate: nowIso
+        }));
+
+        await onUpdateBatch(updatedList);
+        setAiNotice(`Successfully shifted ${updatedList.length} questions from Subject "${shiftSourceSubject}" ➔ "${targetSubClean}"!`);
+        setIsShiftModalOpen(false);
+      } catch (err: any) {
+        setAiNotice(`Shift Error: ${err.message}`);
+      } finally {
+        setIsAiLoading(false);
+      }
+
+    } else if (shiftMode === 'SUBJECT_CHAPTER_TO_TARGET') {
+      if (!shiftSourceSubject.trim() || !shiftSourceChapter.trim()) {
+        alert('Please select both a source Subject and source Chapter.');
+        return;
+      }
+      if (!targetSubClean) {
+        alert('Please select or type a Target Subject name.');
+        return;
+      }
+
+      const finalChap = targetChapClean || shiftSourceChapter.trim();
+      const matching = shiftMatchingQuestions;
+
+      if (matching.length === 0) {
+        alert(`No questions found under Subject "${shiftSourceSubject}" ➔ Chapter "${shiftSourceChapter}".`);
+        return;
+      }
+
+      if (
+        shiftSourceSubject.trim().toLowerCase() === targetSubClean.toLowerCase() &&
+        shiftSourceChapter.trim().toLowerCase() === finalChap.toLowerCase()
+      ) {
+        alert('Source Subject+Chapter and Target Subject+Chapter are identical.');
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to shift ${matching.length} questions from "${shiftSourceSubject} / ${shiftSourceChapter}" to "${targetSubClean} / ${finalChap}"?`)) {
+        return;
+      }
+
+      setIsAiLoading(true);
+      setAiNotice(`Shifting ${matching.length} questions to "${targetSubClean} / ${finalChap}"...`);
+
+      try {
+        const nowIso = new Date().toISOString();
+        const updatedList: Question[] = matching.map(q => ({
+          ...q,
+          subject: targetSubClean,
+          chapter: finalChap,
+          updatedDate: nowIso
+        }));
+
+        await onUpdateBatch(updatedList);
+        setAiNotice(`Successfully shifted ${updatedList.length} questions from "${shiftSourceSubject} / ${shiftSourceChapter}" ➔ "${targetSubClean} / ${finalChap}"!`);
+        setIsShiftModalOpen(false);
+      } catch (err: any) {
+        setAiNotice(`Shift Error: ${err.message}`);
+      } finally {
+        setIsAiLoading(false);
+      }
+
+    } else if (shiftMode === 'SELECTED_MCQS') {
+      if (selectedIds.size === 0) {
+        alert('No questions selected. Please check at least one question in the table first.');
+        return;
+      }
+      if (!targetSubClean) {
+        alert('Please select or type a Target Subject name.');
+        return;
+      }
+
+      const finalChap = targetChapClean || 'General';
+
+      if (!confirm(`Are you sure you want to shift ${selectedIds.size} selected questions to Subject "${targetSubClean}" & Chapter "${finalChap}"?`)) {
+        return;
+      }
+
+      setIsAiLoading(true);
+      setAiNotice(`Shifting ${selectedIds.size} selected questions to "${targetSubClean} / ${finalChap}"...`);
+
+      try {
+        const nowIso = new Date().toISOString();
+        const updatedList: Question[] = questions
+          .filter(q => selectedIds.has(q.id!))
+          .map(q => ({
+            ...q,
+            subject: targetSubClean,
+            chapter: finalChap,
+            updatedDate: nowIso
+          }));
+
+        await onUpdateBatch(updatedList);
+        setSelectedIds(new Set());
+        setAiNotice(`Successfully shifted ${updatedList.length} selected questions to "${targetSubClean}" / "${finalChap}"!`);
+        setIsShiftModalOpen(false);
+      } catch (err: any) {
+        setAiNotice(`Shift Error: ${err.message}`);
+      } finally {
+        setIsAiLoading(false);
+      }
+    }
+  };
 
   // Filtered Questions List
   const filteredQuestions = useMemo(() => {
@@ -709,6 +1028,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
           >
             Reset Filters
           </button>
+
+          <button
+            onClick={() => openShiftModal()}
+            className="w-full bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/80 text-xs py-2 px-3 rounded-lg flex items-center justify-center space-x-2 font-bold transition-all shadow-sm"
+            title="Shift or reassign Subject to Subject, or Subject Chapter to another Subject Chapter"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Shift Subject / Chapter</span>
+          </button>
         </div>
       </div>
 
@@ -1000,6 +1328,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                   <span>AI Classify</span>
                 </button>
                 <button
+                  onClick={() => openShiftModal('SELECTED_MCQS')}
+                  disabled={isAiLoading}
+                  className="flex items-center space-x-1.5 bg-indigo-900 hover:bg-indigo-800 text-indigo-100 border border-indigo-600 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                  title="Shift selected questions to a new Subject & Chapter"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-300" />
+                  <span>Shift ({selectedIds.size})</span>
+                </button>
+                <button
                   onClick={handleDeleteSelected}
                   className="flex items-center space-x-1 bg-rose-900 hover:bg-rose-800 text-rose-200 border border-rose-600 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
                 >
@@ -1033,6 +1370,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                 )}
               </>
             )}
+
+            <button
+              onClick={() => openShiftModal()}
+              className="flex items-center space-x-1.5 bg-indigo-900 hover:bg-indigo-800 text-indigo-100 border border-indigo-600 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors"
+              title="Shift/Reassign entire Subject to another Subject, or Subject Chapter to another Subject Chapter"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Shift Subject/Chapter</span>
+            </button>
 
             {onOpenDuplicateModal && (
               <button
@@ -1455,6 +1801,591 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               >
                 Save Changes
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shift Subject & Chapter Modal */}
+      {isShiftModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-indigo-950 border border-indigo-700/60 rounded-xl text-indigo-400">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>Shift Subject / Chapter</span>
+                    <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-2 py-0.5 rounded-full font-mono">
+                      Shift Engine
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Reassign MCQs from one Subject to another, or from a specific Chapter to another Subject/Chapter.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsShiftModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Mode Switcher Tabs */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setShiftMode('STEP_BY_STEP_SHIFT')}
+                className={`py-2 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center space-x-1 ${
+                  shiftMode === 'STEP_BY_STEP_SHIFT'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <FolderSync className="w-3.5 h-3.5" />
+                <span>Step-by-Step</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShiftMode('SUBJECT_CHAPTER_TO_TARGET')}
+                className={`py-2 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center space-x-1 ${
+                  shiftMode === 'SUBJECT_CHAPTER_TO_TARGET'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Chapter ➔ Target</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShiftMode('SUBJECT_TO_SUBJECT')}
+                className={`py-2 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center space-x-1 ${
+                  shiftMode === 'SUBJECT_TO_SUBJECT'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Subject ➔ Subject</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShiftMode('SELECTED_MCQS')}
+                className={`py-2 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center space-x-1 ${
+                  shiftMode === 'SELECTED_MCQS'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Selected ({selectedIds.size})</span>
+              </button>
+            </div>
+
+            {/* Form Fields for Mode 0: Step-by-Step MCQ Picker & Shift */}
+            {shiftMode === 'STEP_BY_STEP_SHIFT' && (
+              <div className="space-y-3.5">
+                {/* Steps 1 & 2: Choose Source Subject & Source Chapter */}
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider flex items-center">
+                      <span className="w-4 h-4 rounded-full bg-indigo-900 text-indigo-200 text-[10px] inline-flex items-center justify-center font-mono mr-1.5">1</span>
+                      <span>Source Subject & Chapter</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {mcqsInSourceChapter.length} MCQs Available
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-300 block mb-1">
+                        1. Choose Source Subject (विषय)
+                      </label>
+                      <select
+                        value={shiftSourceSubject}
+                        onChange={e => {
+                          const newSub = e.target.value;
+                          setShiftSourceSubject(newSub);
+                          const subChapsMap = new Map<string, string>();
+                          questions.forEach(q => {
+                            if ((q.subject || '').trim().toLowerCase() === newSub.trim().toLowerCase() && q.chapter && q.chapter.trim()) {
+                              const trimmed = q.chapter.trim();
+                              const lower = trimmed.toLowerCase();
+                              if (!subChapsMap.has(lower)) subChapsMap.set(lower, trimmed);
+                            }
+                          });
+                          const subChaps = Array.from(subChapsMap.values());
+                          const firstChap = subChaps[0] || '';
+                          setShiftSourceChapter(firstChap);
+
+                          // Update selected MCQs for new subject/chapter
+                          const inChap = questions.filter(q => 
+                            (q.subject || '').trim().toLowerCase() === newSub.trim().toLowerCase() &&
+                            (q.chapter || '').trim().toLowerCase() === firstChap.trim().toLowerCase()
+                          );
+                          setShiftMcqSelection(new Set(inChap.map(q => q.id!).filter(Boolean)));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-500 font-medium"
+                      >
+                        <option value="">Select Source Subject...</option>
+                        {subjects.map(s => {
+                          const count = questions.filter(q => (q.subject || '').trim().toLowerCase() === s.toLowerCase()).length;
+                          return (
+                            <option key={s} value={s}>
+                              {s} ({count} MCQs)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-300 block mb-1">
+                        2. Choose Source Chapter (अध्याय)
+                      </label>
+                      <select
+                        value={shiftSourceChapter}
+                        onChange={e => {
+                          const newChap = e.target.value;
+                          setShiftSourceChapter(newChap);
+                          const inChap = questions.filter(q => 
+                            (q.subject || '').trim().toLowerCase() === shiftSourceSubject.trim().toLowerCase() &&
+                            (q.chapter || '').trim().toLowerCase() === newChap.trim().toLowerCase()
+                          );
+                          setShiftMcqSelection(new Set(inChap.map(q => q.id!).filter(Boolean)));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-500 font-medium"
+                      >
+                        <option value="">Select Source Chapter...</option>
+                        {chaptersForSourceSubject.map(c => {
+                          const count = questions.filter(q => 
+                            (q.subject || '').trim().toLowerCase() === shiftSourceSubject.trim().toLowerCase() &&
+                            (q.chapter || '').trim().toLowerCase() === c.toLowerCase()
+                          ).length;
+                          return (
+                            <option key={c} value={c}>
+                              {c} ({count} MCQs)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 3: Select MCQs in Chapter */}
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center">
+                      <span className="w-4 h-4 rounded-full bg-indigo-900 text-indigo-200 text-[10px] inline-flex items-center justify-center font-mono mr-1.5">3</span>
+                      <span>Select MCQs to Shift ({shiftMcqSelection.size} / {mcqsInSourceChapter.length})</span>
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={selectAllShiftMcqs}
+                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2 py-0.5 rounded border border-slate-700 transition-colors font-medium"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deselectAllShiftMcqs}
+                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-0.5 rounded border border-slate-700 transition-colors font-medium"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Scrollable MCQ List */}
+                  <div className="max-h-36 overflow-y-auto border border-slate-800 bg-slate-900/80 rounded-lg p-2 space-y-1.5 custom-scrollbar">
+                    {mcqsInSourceChapter.length === 0 ? (
+                      <p className="text-slate-500 text-xs italic text-center py-3">
+                        No MCQs found in Subject "{shiftSourceSubject || 'Select Subject'}" ➔ Chapter "{shiftSourceChapter || 'Select Chapter'}"
+                      </p>
+                    ) : (
+                      mcqsInSourceChapter.map((q, idx) => {
+                        const isChecked = shiftMcqSelection.has(q.id!);
+                        return (
+                          <div
+                            key={q.id || idx}
+                            onClick={() => toggleShiftMcq(q.id!)}
+                            className={`flex items-start space-x-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                              isChecked
+                                ? 'bg-indigo-950/70 border-indigo-600/80 text-slate-100'
+                                : 'bg-slate-950/50 border-slate-800/80 text-slate-400 hover:bg-slate-800/50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}} // handled by parent div onClick
+                              className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <div className="flex-1 min-w-0 space-y-0.5">
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono text-[10px] text-indigo-400 font-bold">
+                                  MCQ #{idx + 1} (ID: {q.id})
+                                </span>
+                                <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-mono">
+                                  Ans: {q.answer}
+                                </span>
+                              </div>
+                              <p className="line-clamp-2 text-[11px] leading-tight font-medium text-slate-200">
+                                {q.question || 'Empty Question text'}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Step 4: Choose Target Shift Subject & Chapter */}
+                <div className="p-3 bg-indigo-950/30 border border-indigo-800/60 rounded-xl space-y-2.5">
+                  <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">
+                    <span className="w-4 h-4 rounded-full bg-emerald-900 text-emerald-200 text-[10px] inline-flex items-center justify-center font-mono mr-1.5">4</span>
+                    Destination Target (Subject & Chapter)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-semibold text-indigo-200 block mb-1">
+                        Target Subject (नया विषय)
+                      </label>
+                      <input
+                        type="text"
+                        list="target-subjects-list"
+                        value={shiftTargetSubject}
+                        onChange={e => setShiftTargetSubject(e.target.value)}
+                        placeholder="Select or enter target subject..."
+                        className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-400 font-medium"
+                      />
+                      <datalist id="target-subjects-list">
+                        {subjects.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-indigo-200 block mb-1">
+                        Target Chapter (नया अध्याय)
+                      </label>
+                      <input
+                        type="text"
+                        list="target-chapters-list"
+                        value={shiftTargetChapter}
+                        onChange={e => setShiftTargetChapter(e.target.value)}
+                        placeholder="Select or enter target chapter..."
+                        className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-400 font-medium"
+                      />
+                      <datalist id="target-chapters-list">
+                        {allChapters.map(c => <option key={c} value={c} />)}
+                      </datalist>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Summary Card */}
+                <div className="p-3 bg-indigo-950/40 border border-indigo-800/60 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center justify-between text-indigo-200 font-bold">
+                    <span className="flex items-center space-x-1.5">
+                      <FolderSync className="w-4 h-4 text-indigo-400" />
+                      <span>Shift Action Summary:</span>
+                    </span>
+                    <span className="bg-indigo-900 border border-indigo-700 text-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                      {shiftMcqSelection.size} MCQs Ready to Shift & Paste
+                    </span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    Shifting <strong className="text-white">{shiftMcqSelection.size} selected MCQs</strong> from{' '}
+                    <strong className="text-indigo-300">"{shiftSourceSubject || 'Source Subject'}"</strong> ➔ Chapter{' '}
+                    <strong className="text-indigo-300">"{shiftSourceChapter || 'Source Chapter'}"</strong> to Target Subject{' '}
+                    <strong className="text-emerald-400">"{shiftTargetSubject.trim() || 'Target Subject'}"</strong> ➔ Chapter{' '}
+                    <strong className="text-emerald-400">"{shiftTargetChapter.trim() || shiftSourceChapter || 'Target Chapter'}"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Form Fields for Mode 1: Subject to Subject */}
+            {shiftMode === 'SUBJECT_TO_SUBJECT' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-300 block">
+                      Source Subject (वर्तमान विषय)
+                    </label>
+                    <select
+                      value={shiftSourceSubject}
+                      onChange={e => {
+                        setShiftSourceSubject(e.target.value);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-indigo-500 font-medium"
+                    >
+                      <option value="">Select Source Subject...</option>
+                      {subjects.map(s => {
+                        const count = questions.filter(q => (q.subject || '').trim().toLowerCase() === s.toLowerCase()).length;
+                        return (
+                          <option key={s} value={s}>
+                            {s} ({count} MCQs)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-indigo-300 block">
+                      Target Subject (नया विषय)
+                    </label>
+                    <input
+                      type="text"
+                      list="existing-subjects-list"
+                      value={shiftTargetSubject}
+                      onChange={e => setShiftTargetSubject(e.target.value)}
+                      placeholder="Select existing or type new subject name..."
+                      className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-indigo-400 font-medium placeholder:text-slate-500"
+                    />
+                    <datalist id="existing-subjects-list">
+                      {subjects.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+                </div>
+
+                {/* Live Preview Card */}
+                <div className="p-3.5 bg-indigo-950/40 border border-indigo-800/60 rounded-xl text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-indigo-200 font-bold">
+                    <span className="flex items-center space-x-1.5">
+                      <FolderSync className="w-4 h-4 text-indigo-400" />
+                      <span>Shift Action Summary:</span>
+                    </span>
+                    <span className="bg-indigo-900 border border-indigo-700 text-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                      {shiftMatchingQuestions.length} MCQs Affected
+                    </span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    All <strong className="text-white">{shiftMatchingQuestions.length} MCQs</strong> in Subject{' '}
+                    <strong className="text-indigo-300">"{shiftSourceSubject || 'None'}"</strong> will be shifted to Target Subject{' '}
+                    <strong className="text-emerald-400">"{shiftTargetSubject.trim() || 'New Subject'}"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Form Fields for Mode 2: Subject in Chapter to Other Subject in Chapter */}
+            {shiftMode === 'SUBJECT_CHAPTER_TO_TARGET' && (
+              <div className="space-y-4">
+                {/* Source Selection */}
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    1. Source Location (स्थान जहाँ से शिफ्ट करना है)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                        Source Subject
+                      </label>
+                      <select
+                        value={shiftSourceSubject}
+                        onChange={e => {
+                          const newSub = e.target.value;
+                          setShiftSourceSubject(newSub);
+                          const subChaps = questions
+                            .filter(q => (q.subject || '').trim().toLowerCase() === newSub.trim().toLowerCase())
+                            .map(q => q.chapter)
+                            .filter(Boolean);
+                          if (subChaps.length > 0) {
+                            setShiftSourceChapter(subChaps[0]);
+                          } else {
+                            setShiftSourceChapter('');
+                          }
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-500 font-medium"
+                      >
+                        <option value="">Select Source Subject...</option>
+                        {subjects.map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                        Source Chapter
+                      </label>
+                      <select
+                        value={shiftSourceChapter}
+                        onChange={e => setShiftSourceChapter(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-500 font-medium"
+                      >
+                        <option value="">Select Source Chapter...</option>
+                        {chaptersForSourceSubject.map(c => {
+                          const count = questions.filter(q => 
+                            (q.subject || '').trim().toLowerCase() === shiftSourceSubject.trim().toLowerCase() &&
+                            (q.chapter || '').trim().toLowerCase() === c.toLowerCase()
+                          ).length;
+                          return (
+                            <option key={c} value={c}>
+                              {c} ({count} MCQs)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Target Selection */}
+                <div className="p-3 bg-indigo-950/30 border border-indigo-800/60 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider block">
+                    2. Destination Location (स्थान जहाँ भेजना है)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-indigo-200 block mb-1">
+                        Target Subject
+                      </label>
+                      <input
+                        type="text"
+                        list="target-subjects-list"
+                        value={shiftTargetSubject}
+                        onChange={e => setShiftTargetSubject(e.target.value)}
+                        placeholder="Select or enter target subject..."
+                        className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-400 font-medium"
+                      />
+                      <datalist id="target-subjects-list">
+                        {subjects.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-indigo-200 block mb-1">
+                        Target Chapter
+                      </label>
+                      <input
+                        type="text"
+                        list="target-chapters-list"
+                        value={shiftTargetChapter}
+                        onChange={e => setShiftTargetChapter(e.target.value)}
+                        placeholder="Select or enter target chapter..."
+                        className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-lg p-2 focus:outline-none focus:border-indigo-400 font-medium"
+                      />
+                      <datalist id="target-chapters-list">
+                        {allChapters.map(c => <option key={c} value={c} />)}
+                      </datalist>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Preview Card */}
+                <div className="p-3.5 bg-indigo-950/40 border border-indigo-800/60 rounded-xl text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-indigo-200 font-bold">
+                    <span className="flex items-center space-x-1.5">
+                      <FolderSync className="w-4 h-4 text-indigo-400" />
+                      <span>Shift Action Summary:</span>
+                    </span>
+                    <span className="bg-indigo-900 border border-indigo-700 text-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                      {shiftMatchingQuestions.length} MCQs Found
+                    </span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    Shifting <strong className="text-white">{shiftMatchingQuestions.length} MCQs</strong> from{' '}
+                    <strong className="text-indigo-300">"{shiftSourceSubject || 'Sub'}"</strong> ➔ Chapter{' '}
+                    <strong className="text-indigo-300">"{shiftSourceChapter || 'Chap'}"</strong> to Target Subject{' '}
+                    <strong className="text-emerald-400">"{shiftTargetSubject.trim() || 'Target Sub'}"</strong> ➔ Chapter{' '}
+                    <strong className="text-emerald-400">"{shiftTargetChapter.trim() || shiftSourceChapter || 'Target Chap'}"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Form Fields for Mode 3: Selected MCQs */}
+            {shiftMode === 'SELECTED_MCQS' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-indigo-300 block">
+                      Target Subject (नया विषय)
+                    </label>
+                    <input
+                      type="text"
+                      list="existing-subjects-list"
+                      value={shiftTargetSubject}
+                      onChange={e => setShiftTargetSubject(e.target.value)}
+                      placeholder="Select existing or type target subject..."
+                      className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-indigo-400 font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-indigo-300 block">
+                      Target Chapter (नया अध्याय)
+                    </label>
+                    <input
+                      type="text"
+                      list="existing-chapters-list"
+                      value={shiftTargetChapter}
+                      onChange={e => setShiftTargetChapter(e.target.value)}
+                      placeholder="Select existing or type target chapter..."
+                      className="w-full bg-slate-950 border border-indigo-500/60 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-indigo-400 font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Preview Card */}
+                <div className="p-3.5 bg-indigo-950/40 border border-indigo-800/60 rounded-xl text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-indigo-200 font-bold">
+                    <span className="flex items-center space-x-1.5">
+                      <FolderSync className="w-4 h-4 text-indigo-400" />
+                      <span>Shift Selected MCQs:</span>
+                    </span>
+                    <span className="bg-indigo-900 border border-indigo-700 text-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                      {selectedIds.size} Selected Questions
+                    </span>
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">
+                    Reassigning <strong className="text-white">{selectedIds.size} checked MCQs</strong> to Subject{' '}
+                    <strong className="text-emerald-400">"{shiftTargetSubject.trim() || 'Target Subject'}"</strong> & Chapter{' '}
+                    <strong className="text-emerald-400">"{shiftTargetChapter.trim() || 'Target Chapter'}"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+              <span className="text-[11px] text-slate-500 font-medium">
+                Updates local database & syncs with cloud.
+              </span>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsShiftModalOpen(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteShift}
+                  disabled={shiftMatchingQuestions.length === 0}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all flex items-center space-x-1.5"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>Execute Shift ({shiftMatchingQuestions.length})</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
