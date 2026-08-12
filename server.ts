@@ -2489,9 +2489,31 @@ app.post(["/api/online-mocks/:shareId/submit", "/online-mocks/:shareId/submit"],
       timeTakenSeconds
     } = req.body;
 
-    const mock = onlineMocksStore[shareId];
+    let mock = onlineMocksStore[shareId];
     if (!mock) {
-      return res.status(404).json({ success: false, error: "Online Mock Test not found." });
+      const bodyTestName = req.body.testName || req.body.testConfig?.testName || 'Online Mock Test';
+      const bodyQuestions = req.body.questions || req.body.testConfig?.questions || [];
+      const bodyTotalMarks = parseSafeNumber(req.body.totalMarks || req.body.testConfig?.totalMarks, 100);
+      const bodyMarksPerQ = parseSafeNumber(req.body.marksPerQuestion || req.body.testConfig?.marksPerQuestion, 2);
+      const bodyNegMarksPerQ = parseSafeNumber(req.body.negativeMarksPerQuestion || req.body.testConfig?.negativeMarksPerQuestion, 0.5);
+
+      mock = {
+        shareId,
+        mockId: Date.now(),
+        testName: bodyTestName,
+        instituteName: req.body.instituteName || "Gradeup Study",
+        duration: parseSafeNumber(req.body.duration, 60),
+        totalMarks: bodyTotalMarks,
+        marksPerQuestion: bodyMarksPerQ,
+        negativeMarksPerQuestion: bodyNegMarksPerQ,
+        socialTasks: [],
+        questions: bodyQuestions,
+        createdDate: new Date().toISOString(),
+        instructions: "Online mock test.",
+        isActive: true,
+        attempts: []
+      };
+      onlineMocksStore[shareId] = mock;
     }
 
     if (!studentName || !mobileNo || !state || !district) {
@@ -2500,26 +2522,36 @@ app.post(["/api/online-mocks/:shareId/submit", "/online-mocks/:shareId/submit"],
 
     const posMark = mock.marksPerQuestion || 2;
     const negMark = mock.negativeMarksPerQuestion || 0;
-    let correctCount = 0;
-    let incorrectCount = 0;
-    let unattemptedCount = 0;
+    let correctCount = parseSafeNumber(req.body.correctCount, -1);
+    let incorrectCount = parseSafeNumber(req.body.incorrectCount, -1);
+    let unattemptedCount = parseSafeNumber(req.body.unattemptedCount, -1);
 
     const userAnswers: Record<number, 'A' | 'B' | 'C' | 'D'> = answers || {};
 
-    (mock.questions || []).forEach((q, idx) => {
-      const qKey = q.id || idx + 1;
-      const userAns = userAnswers[qKey] || userAnswers[idx];
-      if (!userAns) {
-        unattemptedCount++;
-      } else if (userAns === q.answer) {
-        correctCount++;
-      } else {
-        incorrectCount++;
-      }
-    });
+    if (correctCount < 0 && (mock.questions || []).length > 0) {
+      correctCount = 0;
+      incorrectCount = 0;
+      unattemptedCount = 0;
+      (mock.questions || []).forEach((q, idx) => {
+        const qKey = q.id || idx + 1;
+        const userAns = userAnswers[qKey] || userAnswers[idx];
+        if (!userAns) {
+          unattemptedCount++;
+        } else if (userAns === q.answer) {
+          correctCount++;
+        } else {
+          incorrectCount++;
+        }
+      });
+    } else if (correctCount < 0) {
+      correctCount = 0;
+      incorrectCount = 0;
+      unattemptedCount = 0;
+    }
 
-    const calculatedScore = Math.max(0, (correctCount * posMark) - (incorrectCount * negMark));
-    const percentage = Math.round((calculatedScore / (mock.totalMarks || 1)) * 1000) / 10;
+    let calculatedScore = req.body.score !== undefined ? parseSafeNumber(req.body.score, 0) : Math.max(0, (correctCount * posMark) - (incorrectCount * negMark));
+    const totalMarks = mock.totalMarks || parseSafeNumber(req.body.totalMarks, 100);
+    const percentage = req.body.percentage !== undefined ? parseSafeNumber(req.body.percentage, 0) : Math.round((calculatedScore / (totalMarks || 1)) * 1000) / 10;
 
     const attemptRecord = {
       id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,

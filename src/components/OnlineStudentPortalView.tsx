@@ -316,6 +316,21 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     }
 
     if (resultData) {
+      // Always store attempt locally as well for dual-sync reliability
+      if (resultData.attempt) {
+        try {
+          const storageKey = `gradeup_online_attempts_${shareId}`;
+          const existingRaw = localStorage.getItem(storageKey);
+          const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+          if (!existingList.some((a: any) => a.id === resultData.attempt.id)) {
+            existingList.push(resultData.attempt);
+            localStorage.setItem(storageKey, JSON.stringify(existingList));
+          }
+        } catch (_locErr) {
+          console.warn('Could not save attempt to local storage:', _locErr);
+        }
+      }
+
       setSubmissionResult(resultData);
       setCurrentStep('SUBMITTED_RESULT');
     } else {
