@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { MockHistory, OnlineMockConfig, SocialMediaTask, StudentAttemptRecord, Question } from '../types';
 import { downloadMockHtmlFile } from '../lib/generateMockHtml';
+import { encodeMockForUrl } from '../lib/mockEncoder';
 
 const LOCAL_STORAGE_MOCKS_KEY = 'gradeup_published_mocks_v1';
 
@@ -123,6 +124,17 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     setLoading(true);
     let combinedMocks: any[] = [];
     const localList = getStoredLocalMocks();
+
+    // Auto-sync local storage mocks to server
+    for (const loc of localList) {
+      try {
+        await fetch('/api/online-mocks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(loc)
+        });
+      } catch (_e) {}
+    }
 
     try {
       const res = await fetch('/api/online-mocks');
@@ -410,14 +422,29 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
   };
 
   // Helper to generate full public link
-  const getPublicShareUrl = (shareId: string) => {
+  const getPublicShareUrl = (shareId: string, fullConfig?: OnlineMockConfig) => {
     const origin = window.location.origin;
-    return `${origin}/?publicMock=${shareId}`;
+    let url = `${origin}/?publicMock=${shareId}`;
+
+    let configToEncode = fullConfig;
+    if (!configToEncode) {
+      const localList = getStoredLocalMocks();
+      configToEncode = localList.find(m => m.shareId === shareId);
+    }
+
+    if (configToEncode) {
+      const encoded = encodeMockForUrl(configToEncode);
+      if (encoded) {
+        url += `&d=${encoded}`;
+      }
+    }
+
+    return url;
   };
 
   // Copy Link Action
-  const handleCopyShareLink = (shareId: string) => {
-    const url = getPublicShareUrl(shareId);
+  const handleCopyShareLink = (shareId: string, fullConfig?: OnlineMockConfig) => {
+    const url = getPublicShareUrl(shareId, fullConfig);
     navigator.clipboard.writeText(url);
     setCopiedShareId(shareId);
     setTimeout(() => setCopiedShareId(''), 2500);
@@ -542,7 +569,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {publishedMocks.map((mock) => {
-                const shareUrl = getPublicShareUrl(mock.shareId);
+                const shareUrl = getPublicShareUrl(mock.shareId, mock.fullConfig);
                 const isCopied = copiedShareId === mock.shareId;
 
                 return (
@@ -596,7 +623,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => handleCopyShareLink(mock.shareId)}
+                          onClick={() => handleCopyShareLink(mock.shareId, mock.fullConfig)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
                             isCopied
                               ? 'bg-emerald-600 text-white'

@@ -22,9 +22,11 @@ import {
   ExternalLink,
   ShieldCheck,
   AlertCircle,
-  LogOut
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { OnlineMockConfig, SocialMediaTask, StudentAttemptRecord } from '../types';
+import { decodeMockFromUrl } from '../lib/mockEncoder';
 
 interface OnlineStudentPortalViewProps {
   shareId: string;
@@ -90,6 +92,40 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     totalAttempts: number;
     topRankers: StudentAttemptRecord[];
   } | null>(null);
+  const [isRefreshingLeaderboard, setIsRefreshingLeaderboard] = useState<boolean>(false);
+
+  // Refresh Leaderboard Data
+  const handleRefreshLeaderboard = async () => {
+    if (!shareId || isRefreshingLeaderboard) return;
+    setIsRefreshingLeaderboard(true);
+    try {
+      const res = await fetch(`/api/online-mocks/${shareId}/results`);
+      const data = await res.json();
+      if (res.ok && data.success && data.summary) {
+        const updatedTop = data.summary.topRankers || [];
+        const allAtts = data.summary.allAttempts || [];
+        const userIdx = allAtts.findIndex((a: any) =>
+          (mobileNo && a.mobileNo === mobileNo) ||
+          (a.studentName === studentName && a.score === submissionResult?.attempt?.score)
+        );
+        const newRank = userIdx !== -1 ? userIdx + 1 : submissionResult?.rank;
+
+        setSubmissionResult((prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            rank: newRank || prev.rank,
+            totalAttempts: data.summary.totalAttempts || prev.totalAttempts,
+            topRankers: updatedTop
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to refresh leaderboard:', err);
+    } finally {
+      setIsRefreshingLeaderboard(false);
+    }
+  };
 
   // Fetch Public Mock Test Details
   useEffect(() => {
@@ -99,9 +135,13 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
       setErrorMsg('');
 
       try {
+        const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+        const encodedParam = searchParams.get('d') || searchParams.get('data');
+
         // 1. Try API fetch
         try {
-          const res = await fetch(`/api/online-mocks/${shareId}`);
+          const apiUrl = `/api/online-mocks/${shareId}${encodedParam ? `?d=${encodeURIComponent(encodedParam)}` : ''}`;
+          const res = await fetch(apiUrl);
           const resText = await res.text();
           let data: any = {};
           try {
@@ -121,10 +161,34 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
             return;
           }
         } catch (err) {
-          console.warn('API fetch error, falling back to local storage:', err);
+          console.warn('API fetch error, falling back to URL payload/local storage:', err);
         }
 
-        // 2. Try Local Storage Fallback
+        // 2. Try URL Encoded Payload Fallback
+        if (encodedParam) {
+          const decodedMock = decodeMockFromUrl(encodedParam);
+          if (decodedMock && isMounted) {
+            setMockData(decodedMock);
+            setTimeLeftSeconds((decodedMock.duration || 60) * 60);
+            if (!decodedMock.socialTasks || decodedMock.socialTasks.length === 0) {
+              setCurrentStep('REGISTRATION');
+            }
+            setLoading(false);
+
+            // Re-sync decoded test to server in background
+            try {
+              fetch('/api/online-mocks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(decodedMock)
+              });
+            } catch (_e) {}
+
+            return;
+          }
+        }
+
+        // 3. Try Local Storage Fallback
         try {
           const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
           if (rawLocal) {
@@ -137,6 +201,16 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                 setCurrentStep('REGISTRATION');
               }
               setLoading(false);
+
+              // Re-sync to server in background
+              try {
+                fetch('/api/online-mocks', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(found)
+                });
+              } catch (_e) {}
+
               return;
             }
           }
@@ -923,9 +997,17 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <Award className="w-5 h-5 text-amber-400" />
-                  <h3 className="text-base font-bold text-white">Live Topper List & Leaderboard</h3>
+                  <h3 className="text-base font-bold text-white">Live Top 20 Leaderboard</h3>
                 </div>
-                <span className="text-xs text-indigo-400 font-mono font-medium">Top Rankers</span>
+                <button
+                  type="button"
+                  onClick={handleRefreshLeaderboard}
+                  disabled={isRefreshingLeaderboard}
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 px-3 py-1.5 rounded-xl border border-slate-700 flex items-center space-x-1.5 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingLeaderboard ? 'animate-spin text-amber-400' : ''}`} />
+                  <span>Refresh Rank</span>
+                </button>
               </div>
 
               <div className="overflow-x-auto">
@@ -940,8 +1022,9 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-medium">
-                    {submissionResult.topRankers.map((top, idx) => {
-                      const isCurrentUser = top.studentName === studentName && top.score === submissionResult.attempt.score;
+                    {submissionResult.topRankers.slice(0, 20).map((top, idx) => {
+                      const isCurrentUser = (top.studentName === studentName && top.score === submissionResult.attempt.score) ||
+                        ((top as any).mobileNo && (top as any).mobileNo === mobileNo);
                       return (
                         <tr key={idx} className={isCurrentUser ? 'bg-indigo-950/80 font-bold text-white' : 'hover:bg-slate-800/40'}>
                           <td className="p-2.5 font-mono">
@@ -950,7 +1033,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                               idx === 1 ? 'bg-slate-300 text-slate-950' :
                               idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-300'
                             }`}>
-                              {idx + 1}
+                              #{idx + 1}
                             </span>
                           </td>
                           <td className="p-2.5">{top.studentName} {isCurrentUser && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded ml-1">(You)</span>}</td>
@@ -960,6 +1043,17 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                         </tr>
                       );
                     })}
+
+                    {/* Show current user row if outside top 20 */}
+                    {submissionResult.rank > 20 && (
+                      <tr className="bg-indigo-950/90 border-t-2 border-indigo-500 font-bold text-white">
+                        <td className="p-2.5 font-mono text-amber-400">#{submissionResult.rank}</td>
+                        <td className="p-2.5">{studentName} <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded ml-1">(Your Live Position)</span></td>
+                        <td className="p-2.5 text-slate-300">{district}, {state}</td>
+                        <td className="p-2.5 font-mono font-bold text-emerald-400">{submissionResult.attempt.score} / {submissionResult.attempt.totalMarks}</td>
+                        <td className="p-2.5 font-mono text-indigo-300">{submissionResult.attempt.percentage}%</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
