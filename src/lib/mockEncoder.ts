@@ -22,19 +22,22 @@ export function encodeMockForUrl(config: OnlineMockConfig): string {
         u: t.url,
         r: t.isRequired
       })),
-      q: (config.questions || []).map((q, idx) => ({
-        id: q.id || idx + 1,
-        sub: q.subject || 'General',
-        ch: q.chapter || 'General',
-        q: q.question,
-        tr: q.translation,
-        a: q.optionA,
-        b: q.optionB,
-        c: q.optionC,
-        d: q.optionD,
-        ans: q.answer,
-        exp: q.explanation
-      }))
+      q: (config.questions || []).map((q, idx) => {
+        const item: any = {
+          id: q.id || idx + 1,
+          q: q.question,
+          a: q.optionA,
+          b: q.optionB,
+          c: q.optionC,
+          d: q.optionD,
+          ans: q.answer
+        };
+        if (q.subject && q.subject !== 'General') item.sub = q.subject;
+        if (q.chapter && q.chapter !== 'General') item.ch = q.chapter;
+        if (q.translation) item.tr = q.translation;
+        if (q.explanation) item.exp = q.explanation;
+        return item;
+      })
     };
 
     const jsonStr = JSON.stringify(minified);

@@ -138,6 +138,35 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
         const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
         const encodedParam = searchParams.get('c') || searchParams.get('d') || searchParams.get('data');
 
+        // Helper to save loaded mock locally & clean address bar
+        const onMockLoadedSuccess = (m: OnlineMockConfig) => {
+          if (!isMounted) return;
+          setMockData(m);
+          setTimeLeftSeconds((m.duration || 60) * 60);
+          if (!m.socialTasks || m.socialTasks.length === 0) {
+            setCurrentStep('REGISTRATION');
+          }
+          setLoading(false);
+
+          // Save to local storage for local persistence
+          try {
+            const raw = localStorage.getItem('gradeup_published_mocks_v1');
+            let list: OnlineMockConfig[] = raw ? JSON.parse(raw) : [];
+            if (!list.some(x => x.shareId === m.shareId)) {
+              list.unshift(m);
+              localStorage.setItem('gradeup_published_mocks_v1', JSON.stringify(list));
+            }
+          } catch (_sErr) {}
+
+          // Clean up address bar query string so URL looks neat
+          try {
+            if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+              const cleanUrl = `${window.location.origin}${window.location.pathname}?publicMock=${shareId}`;
+              window.history.replaceState(null, '', cleanUrl);
+            }
+          } catch (_hErr) {}
+        };
+
         // 1. Try API fetch
         try {
           const apiUrl = `/api/online-mocks/${shareId}${encodedParam ? `?c=${encodeURIComponent(encodedParam)}` : ''}`;
@@ -149,31 +178,18 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
           } catch (_pErr) {}
 
           if (data && data.success && data.onlineMock) {
-            if (isMounted) {
-              setMockData(data.onlineMock);
-              setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
-
-              if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
-                setCurrentStep('REGISTRATION');
-              }
-              setLoading(false);
-            }
+            onMockLoadedSuccess(data.onlineMock);
             return;
           }
         } catch (err) {
-          console.warn('API fetch error, falling back to local storage:', err);
+          console.warn('API fetch error, falling back to URL payload:', err);
         }
 
         // 2. Try URL Encoded Payload Fallback
         if (encodedParam) {
           const decodedMock = decodeMockFromUrl(encodedParam);
           if (decodedMock && isMounted) {
-            setMockData(decodedMock);
-            setTimeLeftSeconds((decodedMock.duration || 60) * 60);
-            if (!decodedMock.socialTasks || decodedMock.socialTasks.length === 0) {
-              setCurrentStep('REGISTRATION');
-            }
-            setLoading(false);
+            onMockLoadedSuccess(decodedMock);
 
             // Re-sync decoded test to server in background
             try {
@@ -195,12 +211,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
             const list: OnlineMockConfig[] = JSON.parse(rawLocal);
             const found = list.find(m => m.shareId === shareId);
             if (found && isMounted) {
-              setMockData(found);
-              setTimeLeftSeconds((found.duration || 60) * 60);
-              if (!found.socialTasks || found.socialTasks.length === 0) {
-                setCurrentStep('REGISTRATION');
-              }
-              setLoading(false);
+              onMockLoadedSuccess(found);
 
               // Re-sync to server in background
               try {

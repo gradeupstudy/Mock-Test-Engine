@@ -421,14 +421,8 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     }
   };
 
-  // Helper to generate clean public link
-  const getPublicShareUrl = (shareId: string) => {
-    const origin = window.location.origin;
-    return `${origin}/?publicMock=${shareId}`;
-  };
-
-  // Helper to generate compact zlib-compressed portable link
-  const getPortableShareUrl = (shareId: string, fullConfig?: OnlineMockConfig) => {
+  // Helper to generate public link with compact zlib payload
+  const getPublicShareUrl = (shareId: string, fullConfig?: OnlineMockConfig) => {
     const origin = window.location.origin;
     let url = `${origin}/?publicMock=${shareId}`;
 
@@ -449,8 +443,8 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
   };
 
   // Copy Link Action
-  const handleCopyShareLink = (shareId: string, portable = false, fullConfig?: OnlineMockConfig) => {
-    const url = portable ? getPortableShareUrl(shareId, fullConfig) : getPublicShareUrl(shareId);
+  const handleCopyShareLink = (shareId: string, fullConfig?: OnlineMockConfig) => {
+    const url = getPublicShareUrl(shareId, fullConfig);
     navigator.clipboard.writeText(url);
     setCopiedShareId(shareId);
     setTimeout(() => setCopiedShareId(''), 2500);
@@ -575,7 +569,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {publishedMocks.map((mock) => {
-                const shareUrl = getPublicShareUrl(mock.shareId);
+                const shareUrl = getPublicShareUrl(mock.shareId, mock.fullConfig);
                 const isCopied = copiedShareId === mock.shareId;
 
                 return (
@@ -621,7 +615,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                     <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
                       <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         <span>Shareable Student Link:</span>
-                        <span className="text-emerald-400 font-mono">Short & Clean</span>
+                        <span className="text-emerald-400 font-mono">100% Portable Link</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <input
@@ -632,7 +626,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => handleCopyShareLink(mock.shareId, false)}
+                          onClick={() => handleCopyShareLink(mock.shareId, mock.fullConfig)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
                             isCopied === mock.shareId
                               ? 'bg-emerald-600 text-white'
@@ -641,17 +635,6 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                         >
                           {isCopied === mock.shareId ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{isCopied === mock.shareId ? 'Copied' : 'Copy Link'}</span>
-                        </button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[10px]">
-                        <span className="text-slate-400">Need extra fallback?</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyShareLink(mock.shareId, true, mock.fullConfig)}
-                          className="text-indigo-400 hover:text-indigo-300 font-medium underline flex items-center space-x-1"
-                        >
-                          <span>Copy Compressed Portable Link</span>
                         </button>
                       </div>
                     </div>
