@@ -189,14 +189,18 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     setPublishStatusMsg('Publishing online mock test & linking social media channels...');
 
     try {
+      const parsedDuration = isNaN(Number(durationMinutes)) ? 60 : Number(durationMinutes);
+      const parsedMarksPerQ = isNaN(Number(marksPerQ)) ? 2 : Number(marksPerQ);
+      const parsedNegMarksPerQ = isNaN(Number(negativeMarksPerQ)) ? 0.5 : Number(negativeMarksPerQ);
+
       const payload = {
-        testName: nameToPublish,
-        instituteName,
-        duration: durationMinutes,
-        totalMarks: questionsToPublish.length * marksPerQ,
-        marksPerQuestion: marksPerQ,
-        negativeMarksPerQuestion: negativeMarksPerQ,
-        socialTasks,
+        testName: nameToPublish || 'Online Mock Test',
+        instituteName: instituteName || 'Gradeup Study',
+        duration: parsedDuration,
+        totalMarks: questionsToPublish.length * parsedMarksPerQ,
+        marksPerQuestion: parsedMarksPerQ,
+        negativeMarksPerQuestion: parsedNegMarksPerQ,
+        socialTasks: socialTasks || [],
         questions: questionsToPublish,
         isActive: true
       };
@@ -207,18 +211,25 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        alert(`Error: ${data.error}`);
+      const resText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(resText);
+      } catch (_parseErr) {
+        throw new Error(resText ? resText.slice(0, 150) : `Server HTTP Error ${res.status}`);
+      }
+
+      if (!res.ok || !data.success) {
+        alert(`Failed to publish: ${data.error || data.message || `Server returned status ${res.status}`}`);
         return;
       }
 
-      setPublishStatusMsg(`Successfully published! Link created.`);
+      setPublishStatusMsg(`Successfully published! Share link created.`);
       await fetchPublishedMocks();
       setSelectedMockShareId(data.shareId);
       setActiveTab('PUBLISHED_TESTS');
     } catch (err: any) {
-      alert('Failed to publish online test. Please check connection.');
+      alert(`Publish Failed: ${err.message || 'Please check your connection and try again.'}`);
     } finally {
       setIsPublishing(false);
     }

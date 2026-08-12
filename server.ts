@@ -2253,7 +2253,19 @@ app.post("/api/r2/delete", async (req, res) => {
 // ONLINE MOCK TESTS & LIVE RESULT SYNC API
 // ==========================================
 
-const ONLINE_MOCKS_FILE = path.join(process.cwd(), "online_mocks_store.json");
+function getWritableStorePath(): string {
+  const cwdPath = path.join(process.cwd(), "online_mocks_store.json");
+  try {
+    const testFile = path.join(process.cwd(), ".write_test_tmp");
+    fs.writeFileSync(testFile, "test");
+    fs.unlinkSync(testFile);
+    return cwdPath;
+  } catch (_e) {
+    return path.join("/tmp", "online_mocks_store.json");
+  }
+}
+
+const ONLINE_MOCKS_FILE = getWritableStorePath();
 
 interface ServerOnlineMock {
   shareId: string;
@@ -2278,6 +2290,13 @@ try {
   if (fs.existsSync(ONLINE_MOCKS_FILE)) {
     const rawData = fs.readFileSync(ONLINE_MOCKS_FILE, "utf-8");
     onlineMocksStore = JSON.parse(rawData);
+  } else {
+    // Try reading from process.cwd() as fallback if read-only cwd has initial data
+    const altPath = path.join(process.cwd(), "online_mocks_store.json");
+    if (fs.existsSync(altPath)) {
+      const rawData = fs.readFileSync(altPath, "utf-8");
+      onlineMocksStore = JSON.parse(rawData);
+    }
   }
 } catch (e) {
   console.warn("Could not read online_mocks_store.json, starting fresh.", e);
@@ -2289,6 +2308,13 @@ function saveOnlineMocksStore() {
   } catch (e) {
     console.error("Failed to save online_mocks_store.json", e);
   }
+}
+
+function parseSafeNumber(val: any, fallback: number): number {
+  if (val === undefined || val === null || val === '') return fallback;
+  const numStr = String(val).replace(',', '.').trim();
+  const parsed = parseFloat(numStr);
+  return isNaN(parsed) ? fallback : parsed;
 }
 
 // 1. Create or Update Published Online Mock
@@ -2307,7 +2333,7 @@ app.post("/api/online-mocks", (req, res) => {
       questions,
       instructions,
       isActive
-    } = req.body;
+    } = req.body || {};
 
     if (!testName || !questions || !Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({ success: false, error: "Test name and valid question list are required." });
@@ -2316,15 +2342,20 @@ app.post("/api/online-mocks", (req, res) => {
     const sid = shareId && shareId.trim() ? shareId.trim() : `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const existing = onlineMocksStore[sid];
 
+    const parsedDuration = parseSafeNumber(duration, 60);
+    const parsedMarksPerQ = parseSafeNumber(marksPerQuestion, 2);
+    const parsedNegMarksPerQ = parseSafeNumber(negativeMarksPerQuestion, 0.5);
+    const parsedTotalMarks = parseSafeNumber(totalMarks, questions.length * parsedMarksPerQ);
+
     const mockRecord: ServerOnlineMock = {
       shareId: sid,
       mockId: mockId || (existing ? existing.mockId : Date.now()),
-      testName: testName.trim(),
+      testName: String(testName).trim(),
       instituteName: (instituteName || "Gradeup Study").trim(),
-      duration: Number(duration) || 60,
-      totalMarks: Number(totalMarks) || (questions.length * 2),
-      marksPerQuestion: Number(marksPerQuestion) || 2,
-      negativeMarksPerQuestion: Number(negativeMarksPerQuestion) || 0.5,
+      duration: parsedDuration,
+      totalMarks: parsedTotalMarks,
+      marksPerQuestion: parsedMarksPerQ,
+      negativeMarksPerQuestion: parsedNegMarksPerQ,
       socialTasks: Array.isArray(socialTasks) ? socialTasks : [],
       questions,
       createdDate: existing ? existing.createdDate : new Date().toISOString(),
@@ -2346,6 +2377,7 @@ app.post("/api/online-mocks", (req, res) => {
       }
     });
   } catch (err: any) {
+    console.error("Error publishing online mock:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to publish online mock." });
   }
 });

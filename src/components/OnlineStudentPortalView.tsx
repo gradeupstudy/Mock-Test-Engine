@@ -81,7 +81,13 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
       setErrorMsg('');
       try {
         const res = await fetch(`/api/online-mocks/${shareId}`);
-        const data = await res.json();
+        const resText = await res.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(resText);
+        } catch (_pErr) {
+          throw new Error(resText ? resText.slice(0, 120) : `Server HTTP Error ${res.status}`);
+        }
 
         if (!data.success || !data.onlineMock) {
           if (isMounted) setErrorMsg(data.error || 'Failed to load online mock test.');
@@ -98,7 +104,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
           }
         }
       } catch (err: any) {
-        if (isMounted) setErrorMsg('Network error. Please check internet connection.');
+        if (isMounted) setErrorMsg(err.message || 'Network error. Please check internet connection.');
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -213,16 +219,23 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        alert(`Submission Error: ${data.error}`);
+      const resText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(resText);
+      } catch (_pErr) {
+        throw new Error(resText ? resText.slice(0, 150) : `Server HTTP Error ${res.status}`);
+      }
+
+      if (!res.ok || !data.success) {
+        alert(`Submission Error: ${data.error || data.message || `Server Error (${res.status})`}`);
         return;
       }
 
       setSubmissionResult(data);
       setCurrentStep('SUBMITTED_RESULT');
     } catch (err: any) {
-      alert('Failed to submit test. Please check connection and try again.');
+      alert(`Submission Failed: ${err.message || 'Please check connection and try again.'}`);
     } finally {
       setIsSubmitting(false);
     }
