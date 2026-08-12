@@ -61,13 +61,10 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
           <p class="text-xs text-blue-400 font-medium">Online Interactive Test Engine</p>
         </div>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="text-right">
         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
           ${escapeHtml(config.testName)}
         </span>
-        <button onclick="exitPortal()" class="px-3 py-1 rounded-lg text-xs font-bold bg-rose-950/80 text-rose-200 border border-rose-800 hover:bg-rose-900 transition no-print">
-          Exit Portal
-        </button>
       </div>
     </div>
   </header>
@@ -108,38 +105,11 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
       'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi', 'Jammu and Kashmir'
     ];
 
-    function exitPortal() {
-      currentStep = 'EXITED';
-      renderApp();
-      try {
-        window.close();
-      } catch (e) {}
-    }
-
     function renderApp() {
       const container = document.getElementById('app');
       if (!container) return;
 
-      if (currentStep === 'EXITED') {
-        container.innerHTML = \`
-          <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-6 shadow-2xl">
-            <div class="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 text-3xl">
-              ✓
-            </div>
-            <div class="space-y-2">
-              <h2 class="text-2xl font-bold text-white">Portal Exited Successfully</h2>
-              <p class="text-xs text-slate-400 leading-relaxed">
-                You have safely logged out and exited the Gradeup Study Mock Portal. You can now close this browser tab or window.
-              </p>
-            </div>
-            <div class="pt-2">
-              <button onclick="window.close(); setTimeout(function(){ window.location.href='about:blank'; }, 200);" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition shadow">
-                Close Tab / Exit Page
-              </button>
-            </div>
-          </div>
-        \`;
-      } else if (currentStep === 'SOCIAL_FOLLOW') {
+      if (currentStep === 'SOCIAL_FOLLOW') {
         container.innerHTML = renderSocialFollowStep();
       } else if (currentStep === 'REGISTRATION') {
         container.innerHTML = renderRegistrationStep();
@@ -565,72 +535,8 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
         percentage
       };
 
-      // Auto Sync Result to Server Leaderboard if online
-      syncResultToServer();
-
       currentStep = 'RESULT';
       renderApp();
-    }
-
-    function syncResultToServer() {
-      if (!submissionResult) return;
-      var syncStatusEl = document.getElementById('sync-status-badge');
-      if (syncStatusEl) syncStatusEl.innerText = 'Syncing Live Leaderboard... ⏳';
-
-      var originUrl = window.location.origin;
-      var submitEndpoint = originUrl + '/api/online-mocks/' + (TEST_CONFIG.shareId || '') + '/submit';
-
-      var payload = {
-        shareId: TEST_CONFIG.shareId,
-        testName: TEST_CONFIG.testName,
-        studentName: studentDetails.name,
-        mobileNo: studentDetails.mobile,
-        state: studentDetails.state,
-        district: studentDetails.district,
-        socialsFollowed: true,
-        answers: userAnswers,
-        score: submissionResult.score,
-        totalMarks: submissionResult.totalMarks,
-        percentage: submissionResult.percentage,
-        correctCount: submissionResult.correct,
-        incorrectCount: submissionResult.incorrect,
-        unattemptedCount: submissionResult.unattempted,
-        timeTakenSeconds: ((TEST_CONFIG.duration || 60) * 60) - (timeLeftSeconds || 0)
-      };
-
-      fetch(submitEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(function(res) {
-        return res.json();
-      }).then(function(data) {
-        if (data && data.success) {
-          if (syncStatusEl) syncStatusEl.innerText = '✅ Live Leaderboard Synced! Rank #' + (data.rank || 1);
-        } else {
-          if (syncStatusEl) syncStatusEl.innerText = '⚠️ Leaderboard Offline Sync Pending';
-        }
-      }).catch(function(err) {
-        if (syncStatusEl) syncStatusEl.innerText = '⚠️ Leaderboard Offline Sync Pending';
-      });
-    }
-
-    function sendWhatsappResult() {
-      if (!submissionResult) return;
-      var text = '🏆 *' + escapeJs(TEST_CONFIG.instituteName || 'Gradeup Study') + ' - MOCK TEST RESULT*\n' +
-        '----------------------------------------\n' +
-        '📝 *Test:* ' + escapeJs(TEST_CONFIG.testName) + '\n' +
-        '👤 *Student Name:* ' + escapeJs(studentDetails.name) + '\n' +
-        '📱 *Mobile:* ' + escapeJs(studentDetails.mobile) + '\n' +
-        '📍 *District/State:* ' + escapeJs(studentDetails.district) + ', ' + escapeJs(studentDetails.state) + '\n\n' +
-        '📊 *SCORE CARD:*\n' +
-        '• Score: *' + submissionResult.score + ' / ' + submissionResult.totalMarks + '*\n' +
-        '• Accuracy: *' + submissionResult.percentage + '%*\n' +
-        '• Correct: ' + submissionResult.correct + ' | Incorrect: ' + submissionResult.incorrect + ' | Unattempted: ' + submissionResult.unattempted + '\n\n' +
-        '✅ Submitted via Official Mock Test Portal';
-
-      var waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(text);
-      window.open(waUrl, '_blank');
     }
 
     function renderResultStep() {
@@ -737,21 +643,9 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
               </div>
             </div>
 
-            <div class="pt-1 text-center">
-              <span id="sync-status-badge" class="text-xs font-mono font-bold text-indigo-300 bg-indigo-950/60 border border-indigo-700/60 px-3 py-1.5 rounded-xl inline-block shadow">
-                Syncing Live Leaderboard... ⏳
-              </span>
-            </div>
-
             <div class="flex flex-wrap items-center justify-center gap-3 no-print pt-2">
-              <button onclick="sendWhatsappResult()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition flex items-center gap-2">
-                💬 Send Score to Teacher / Institute on WhatsApp
-              </button>
-              <button onclick="syncResultToServer()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg transition flex items-center gap-2">
-                🔄 Manual Retry Sync
-              </button>
-              <button onclick="window.print()" class="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold shadow-lg transition flex items-center gap-2">
-                🖨️ Print / Save PDF
+              <button onclick="window.print()" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg transition flex items-center gap-2">
+                🖨️ Print / Save PDF Scorecard
               </button>
             </div>
           </div>

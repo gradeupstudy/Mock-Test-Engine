@@ -21,12 +21,9 @@ import {
   Sparkles,
   ExternalLink,
   ShieldCheck,
-  AlertCircle,
-  LogOut,
-  RefreshCw
+  AlertCircle
 } from 'lucide-react';
 import { OnlineMockConfig, SocialMediaTask, StudentAttemptRecord } from '../types';
-import { decodeMockFromUrl } from '../lib/mockEncoder';
 
 interface OnlineStudentPortalViewProps {
   shareId: string;
@@ -47,25 +44,8 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [mockData, setMockData] = useState<OnlineMockConfig | null>(null);
 
-  // Flow Steps: 'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT' | 'EXITED'
-  const [currentStep, setCurrentStep] = useState<'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT' | 'EXITED'>('SOCIAL_FOLLOW');
-
-  const handleExitPortal = () => {
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('publicMock');
-      url.searchParams.delete('onlineTest');
-      window.history.replaceState({}, '', url.toString());
-    }
-    setCurrentStep('EXITED');
-    if (onExitPortal) {
-      onExitPortal();
-    } else {
-      try {
-        window.close();
-      } catch (_e) {}
-    }
-  };
+  // Flow Steps: 'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT'
+  const [currentStep, setCurrentStep] = useState<'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT'>('SOCIAL_FOLLOW');
 
   // Social Media Following Verification State
   const [visitedSocials, setVisitedSocials] = useState<Record<string, boolean>>({});
@@ -92,40 +72,6 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     totalAttempts: number;
     topRankers: StudentAttemptRecord[];
   } | null>(null);
-  const [isRefreshingLeaderboard, setIsRefreshingLeaderboard] = useState<boolean>(false);
-
-  // Refresh Leaderboard Data
-  const handleRefreshLeaderboard = async () => {
-    if (!shareId || isRefreshingLeaderboard) return;
-    setIsRefreshingLeaderboard(true);
-    try {
-      const res = await fetch(`/api/online-mocks/${shareId}/results`);
-      const data = await res.json();
-      if (res.ok && data.success && data.summary) {
-        const updatedTop = data.summary.topRankers || [];
-        const allAtts = data.summary.allAttempts || [];
-        const userIdx = allAtts.findIndex((a: any) =>
-          (mobileNo && a.mobileNo === mobileNo) ||
-          (a.studentName === studentName && a.score === submissionResult?.attempt?.score)
-        );
-        const newRank = userIdx !== -1 ? userIdx + 1 : submissionResult?.rank;
-
-        setSubmissionResult((prev: any) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            rank: newRank || prev.rank,
-            totalAttempts: data.summary.totalAttempts || prev.totalAttempts,
-            topRankers: updatedTop
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('Failed to refresh leaderboard:', err);
-    } finally {
-      setIsRefreshingLeaderboard(false);
-    }
-  };
 
   // Fetch Public Mock Test Details
   useEffect(() => {
@@ -134,110 +80,51 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
       setLoading(true);
       setErrorMsg('');
 
+      // 1. Try API fetch
       try {
-        const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-        const encodedParam = searchParams.get('c') || searchParams.get('d') || searchParams.get('data');
-
-        // Helper to save loaded mock locally & clean address bar
-        const onMockLoadedSuccess = (m: OnlineMockConfig) => {
-          if (!isMounted) return;
-          setMockData(m);
-          setTimeLeftSeconds((m.duration || 60) * 60);
-          if (!m.socialTasks || m.socialTasks.length === 0) {
-            setCurrentStep('REGISTRATION');
-          }
-          setLoading(false);
-
-          // Save to local storage for local persistence
-          try {
-            const raw = localStorage.getItem('gradeup_published_mocks_v1');
-            let list: OnlineMockConfig[] = raw ? JSON.parse(raw) : [];
-            if (!list.some(x => x.shareId === m.shareId)) {
-              list.unshift(m);
-              localStorage.setItem('gradeup_published_mocks_v1', JSON.stringify(list));
-            }
-          } catch (_sErr) {}
-
-          // Clean up address bar query string so URL looks neat
-          try {
-            if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-              const cleanUrl = `${window.location.origin}${window.location.pathname}?publicMock=${shareId}`;
-              window.history.replaceState(null, '', cleanUrl);
-            }
-          } catch (_hErr) {}
-        };
-
-        // 1. Try API fetch
+        const res = await fetch(`/api/online-mocks/${shareId}`);
+        const resText = await res.text();
+        let data: any = {};
         try {
-          const apiUrl = `/api/online-mocks/${shareId}${encodedParam ? `?c=${encodeURIComponent(encodedParam)}` : ''}`;
-          const res = await fetch(apiUrl);
-          const resText = await res.text();
-          let data: any = {};
-          try {
-            data = JSON.parse(resText);
-          } catch (_pErr) {}
+          data = JSON.parse(resText);
+        } catch (_pErr) {}
 
-          if (data && data.success && data.onlineMock) {
-            onMockLoadedSuccess(data.onlineMock);
-            return;
+        if (data && data.success && data.onlineMock) {
+          if (isMounted) {
+            setMockData(data.onlineMock);
+            setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
+
+            if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
+              setCurrentStep('REGISTRATION');
+            }
           }
-        } catch (err) {
-          console.warn('API fetch error, falling back to URL payload:', err);
+          return;
         }
+      } catch (err) {
+        console.warn('API fetch error, falling back to local storage:', err);
+      }
 
-        // 2. Try URL Encoded Payload Fallback
-        if (encodedParam) {
-          const decodedMock = decodeMockFromUrl(encodedParam);
-          if (decodedMock && isMounted) {
-            onMockLoadedSuccess(decodedMock);
-
-            // Re-sync decoded test to server in background
-            try {
-              fetch('/api/online-mocks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(decodedMock)
-              });
-            } catch (_e) {}
-
+      // 2. Try Local Storage Fallback
+      try {
+        const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
+        if (rawLocal) {
+          const list: OnlineMockConfig[] = JSON.parse(rawLocal);
+          const found = list.find(m => m.shareId === shareId);
+          if (found && isMounted) {
+            setMockData(found);
+            setTimeLeftSeconds((found.duration || 60) * 60);
+            if (!found.socialTasks || found.socialTasks.length === 0) {
+              setCurrentStep('REGISTRATION');
+            }
             return;
           }
         }
+      } catch (_locErr) {
+        console.warn('Local storage read error:', _locErr);
+      }
 
-        // 3. Try Local Storage Fallback
-        try {
-          const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
-          if (rawLocal) {
-            const list: OnlineMockConfig[] = JSON.parse(rawLocal);
-            const found = list.find(m => m.shareId === shareId);
-            if (found && isMounted) {
-              onMockLoadedSuccess(found);
-
-              // Re-sync to server in background
-              try {
-                fetch('/api/online-mocks', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(found)
-                });
-              } catch (_e) {}
-
-              return;
-            }
-          }
-        } catch (_locErr) {
-          console.warn('Local storage read error:', _locErr);
-        }
-
-        if (isMounted) {
-          setErrorMsg('Failed to load online mock test. Please verify the link or share ID.');
-          setLoading(false);
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          setErrorMsg(err?.message || 'Error loading mock test.');
-          setLoading(false);
-        }
+      if (isMounted) {
+        setErrorMsg('Failed to load online mock test. Please verify the link or share ID.');
       }
     }
 
@@ -419,21 +306,6 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     }
 
     if (resultData) {
-      // Always store attempt locally as well for dual-sync reliability
-      if (resultData.attempt) {
-        try {
-          const storageKey = `gradeup_online_attempts_${shareId}`;
-          const existingRaw = localStorage.getItem(storageKey);
-          const existingList = existingRaw ? JSON.parse(existingRaw) : [];
-          if (!existingList.some((a: any) => a.id === resultData.attempt.id)) {
-            existingList.push(resultData.attempt);
-            localStorage.setItem(storageKey, JSON.stringify(existingList));
-          }
-        } catch (_locErr) {
-          console.warn('Could not save attempt to local storage:', _locErr);
-        }
-      }
-
       setSubmissionResult(resultData);
       setCurrentStep('SUBMITTED_RESULT');
     } else {
@@ -468,25 +340,14 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
           </div>
           <h2 className="text-xl font-bold text-slate-100">Unable to Open Mock Test</h2>
           <p className="text-sm text-slate-400">{errorMsg || 'Mock Test not found.'}</p>
-          
-          <div className="pt-2 space-y-2">
+          {onExitPortal && (
             <button
-              onClick={() => window.location.reload()}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2"
+              onClick={onExitPortal}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Retry Loading Test</span>
+              Back to App
             </button>
-
-            {onExitPortal && (
-              <button
-                onClick={onExitPortal}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
-              >
-                Back to App
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
     );
@@ -523,47 +384,19 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={handleExitPortal}
-            className="text-xs bg-rose-950/60 hover:bg-rose-900 text-rose-200 px-3.5 py-1.5 rounded-xl border border-rose-800/80 font-bold transition-colors flex items-center space-x-1 shadow-sm"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Exit Portal</span>
-          </button>
+          {onExitPortal && (
+            <button
+              onClick={onExitPortal}
+              className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
+            >
+              Exit Portal
+            </button>
+          )}
         </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-5xl mx-auto px-4 py-6">
-        {/* ================= STEP 5: EXITED SCREEN ================= */}
-        {currentStep === 'EXITED' && (
-          <div className="max-w-md mx-auto my-12 bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-6 shadow-2xl">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-white">Portal Exited Successfully</h2>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                You have safely logged out and exited the Gradeup Study Mock Portal. You can now close this browser tab or window.
-              </p>
-            </div>
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  window.close();
-                  setTimeout(() => {
-                    window.location.href = 'about:blank';
-                  }, 200);
-                }}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all shadow"
-              >
-                Close Tab / Exit Page
-              </button>
-            </div>
-          </div>
-        )}
         {/* ================= STEP 1: SOCIAL MEDIA MANDATE ================= */}
         {currentStep === 'SOCIAL_FOLLOW' && (
           <div className="max-w-2xl mx-auto bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6">
@@ -1019,17 +852,9 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <Award className="w-5 h-5 text-amber-400" />
-                  <h3 className="text-base font-bold text-white">Live Top 20 Leaderboard</h3>
+                  <h3 className="text-base font-bold text-white">Live Topper List & Leaderboard</h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleRefreshLeaderboard}
-                  disabled={isRefreshingLeaderboard}
-                  className="text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 px-3 py-1.5 rounded-xl border border-slate-700 flex items-center space-x-1.5 transition-colors"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingLeaderboard ? 'animate-spin text-amber-400' : ''}`} />
-                  <span>Refresh Rank</span>
-                </button>
+                <span className="text-xs text-indigo-400 font-mono font-medium">Top Rankers</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -1044,9 +869,8 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-medium">
-                    {submissionResult.topRankers.slice(0, 20).map((top, idx) => {
-                      const isCurrentUser = (top.studentName === studentName && top.score === submissionResult.attempt.score) ||
-                        ((top as any).mobileNo && (top as any).mobileNo === mobileNo);
+                    {submissionResult.topRankers.map((top, idx) => {
+                      const isCurrentUser = top.studentName === studentName && top.score === submissionResult.attempt.score;
                       return (
                         <tr key={idx} className={isCurrentUser ? 'bg-indigo-950/80 font-bold text-white' : 'hover:bg-slate-800/40'}>
                           <td className="p-2.5 font-mono">
@@ -1055,7 +879,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                               idx === 1 ? 'bg-slate-300 text-slate-950' :
                               idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-300'
                             }`}>
-                              #{idx + 1}
+                              {idx + 1}
                             </span>
                           </td>
                           <td className="p-2.5">{top.studentName} {isCurrentUser && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded ml-1">(You)</span>}</td>
@@ -1065,17 +889,6 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
                         </tr>
                       );
                     })}
-
-                    {/* Show current user row if outside top 20 */}
-                    {submissionResult.rank > 20 && (
-                      <tr className="bg-indigo-950/90 border-t-2 border-indigo-500 font-bold text-white">
-                        <td className="p-2.5 font-mono text-amber-400">#{submissionResult.rank}</td>
-                        <td className="p-2.5">{studentName} <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded ml-1">(Your Live Position)</span></td>
-                        <td className="p-2.5 text-slate-300">{district}, {state}</td>
-                        <td className="p-2.5 font-mono font-bold text-emerald-400">{submissionResult.attempt.score} / {submissionResult.attempt.totalMarks}</td>
-                        <td className="p-2.5 font-mono text-indigo-300">{submissionResult.attempt.percentage}%</td>
-                      </tr>
-                    )}
                   </tbody>
                 </table>
               </div>

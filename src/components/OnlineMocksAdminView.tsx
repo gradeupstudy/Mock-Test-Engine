@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { MockHistory, OnlineMockConfig, SocialMediaTask, StudentAttemptRecord, Question } from '../types';
 import { downloadMockHtmlFile } from '../lib/generateMockHtml';
-import { encodeMockForUrl } from '../lib/mockEncoder';
 
 const LOCAL_STORAGE_MOCKS_KEY = 'gradeup_published_mocks_v1';
 
@@ -125,17 +124,6 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     let combinedMocks: any[] = [];
     const localList = getStoredLocalMocks();
 
-    // Auto-sync local storage mocks to server
-    for (const loc of localList) {
-      try {
-        await fetch('/api/online-mocks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(loc)
-        });
-      } catch (_e) {}
-    }
-
     try {
       const res = await fetch('/api/online-mocks');
       const data = await res.json();
@@ -179,67 +167,11 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
   const fetchMockResults = async (shareId: string) => {
     if (!shareId) return;
     try {
-      let serverAttempts: any[] = [];
-      let summaryData: any = null;
-
-      try {
-        const res = await fetch(`/api/online-mocks/${shareId}/results`);
-        const data = await res.json();
-        if (data.success && data.summary) {
-          summaryData = data.summary;
-          serverAttempts = data.summary.allAttempts || [];
-        }
-      } catch (e) {
-        console.warn('Server fetch for results warning:', e);
+      const res = await fetch(`/api/online-mocks/${shareId}/results`);
+      const data = await res.json();
+      if (data.success && data.summary) {
+        setSelectedMockResults(data);
       }
-
-      // Check local storage for attempts saved locally
-      let localAttempts: any[] = [];
-      try {
-        const rawLoc = localStorage.getItem(`gradeup_online_attempts_${shareId}`);
-        if (rawLoc) {
-          localAttempts = JSON.parse(rawLoc);
-        }
-      } catch (_locE) {}
-
-      // Combine server & local attempts, deduplicating by id
-      const attemptMap = new Map<string, any>();
-      serverAttempts.forEach(a => attemptMap.set(a.id || `${a.studentName}_${a.mobileNo}`, a));
-      localAttempts.forEach(a => {
-        const key = a.id || `${a.studentName}_${a.mobileNo}`;
-        if (!attemptMap.has(key)) {
-          attemptMap.set(key, a);
-        }
-      });
-
-      const allAttempts = Array.from(attemptMap.values()).sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return (a.timeTakenSeconds || 0) - (b.timeTakenSeconds || 0);
-      });
-
-      const rankedAttempts = allAttempts.map((att, idx) => ({
-        ...att,
-        rank: idx + 1
-      }));
-
-      const totalAttempts = rankedAttempts.length;
-      const avgScore = totalAttempts > 0
-        ? Math.round((rankedAttempts.reduce((a, c) => a + (c.score || 0), 0) / totalAttempts) * 10) / 10
-        : 0;
-      const highestScore = totalAttempts > 0 ? rankedAttempts[0].score : 0;
-
-      setSelectedMockResults({
-        success: true,
-        summary: {
-          shareId,
-          testName: summaryData?.testName || 'Online Mock Test',
-          totalAttempts,
-          avgScore,
-          highestScore,
-          topRankers: rankedAttempts.slice(0, 10),
-          allAttempts: rankedAttempts
-        }
-      });
     } catch (e) {
       console.warn('Failed to fetch mock results:', e);
     }
@@ -249,56 +181,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     if (selectedMockShareId) {
       fetchMockResults(selectedMockShareId);
     }
-
-    let pollInterval: any = null;
-    if (activeTab === 'LIVE_RESULTS' && selectedMockShareId) {
-      pollInterval = setInterval(() => {
-        fetchMockResults(selectedMockShareId);
-      }, 4000); // Real-time live auto refresh every 4 seconds
-    }
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [selectedMockShareId, activeTab]);
-
-  // Demo Student Generator for Testing Live Leaderboard
-  const handleAddDemoStudentAttempt = async () => {
-    if (!selectedMockShareId) {
-      alert('Please publish a mock test first!');
-      return;
-    }
-    const names = ['Rahul Sharma', 'Ananya Verma', 'Priya Singh', 'Vikram Patel', 'Amit Kumar', 'Neha Gupta', 'Saurabh Joshi'];
-    const districts = ['Patna', 'Lucknow', 'Jaipur', 'Ranchi', 'Delhi', 'Bhopal', 'Indore'];
-    const states = ['Bihar', 'Uttar Pradesh', 'Rajasthan', 'Jharkhand', 'Delhi', 'Madhya Pradesh', 'Madhya Pradesh'];
-    const randomIdx = Math.floor(Math.random() * names.length);
-
-    const demoPayload = {
-      studentName: names[randomIdx],
-      mobileNo: `98${Math.floor(10000000 + Math.random() * 90000000)}`,
-      state: states[randomIdx],
-      district: districts[randomIdx],
-      socialsFollowed: true,
-      score: Math.floor(30 + Math.random() * 65),
-      totalMarks: 100,
-      percentage: Math.floor(40 + Math.random() * 55),
-      correctCount: Math.floor(15 + Math.random() * 30),
-      incorrectCount: Math.floor(2 + Math.random() * 10),
-      unattemptedCount: Math.floor(1 + Math.random() * 8),
-      timeTakenSeconds: Math.floor(600 + Math.random() * 1800)
-    };
-
-    try {
-      await fetch(`/api/online-mocks/${selectedMockShareId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(demoPayload)
-      });
-      await fetchMockResults(selectedMockShareId);
-    } catch (e) {
-      console.warn('Failed to add demo student attempt:', e);
-    }
-  };
+  }, [selectedMockShareId]);
 
   // Social Task Helpers
   const handleAddSocialTask = () => {
@@ -421,30 +304,15 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     }
   };
 
-  // Helper to generate public link with compact zlib payload
-  const getPublicShareUrl = (shareId: string, fullConfig?: OnlineMockConfig) => {
+  // Helper to generate full public link
+  const getPublicShareUrl = (shareId: string) => {
     const origin = window.location.origin;
-    let url = `${origin}/?publicMock=${shareId}`;
-
-    let configToEncode = fullConfig;
-    if (!configToEncode) {
-      const localList = getStoredLocalMocks();
-      configToEncode = localList.find(m => m.shareId === shareId);
-    }
-
-    if (configToEncode) {
-      const encoded = encodeMockForUrl(configToEncode);
-      if (encoded) {
-        url += `&c=${encoded}`;
-      }
-    }
-
-    return url;
+    return `${origin}/?publicMock=${shareId}`;
   };
 
   // Copy Link Action
-  const handleCopyShareLink = (shareId: string, fullConfig?: OnlineMockConfig) => {
-    const url = getPublicShareUrl(shareId, fullConfig);
+  const handleCopyShareLink = (shareId: string) => {
+    const url = getPublicShareUrl(shareId);
     navigator.clipboard.writeText(url);
     setCopiedShareId(shareId);
     setTimeout(() => setCopiedShareId(''), 2500);
@@ -569,7 +437,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {publishedMocks.map((mock) => {
-                const shareUrl = getPublicShareUrl(mock.shareId, mock.fullConfig);
+                const shareUrl = getPublicShareUrl(mock.shareId);
                 const isCopied = copiedShareId === mock.shareId;
 
                 return (
@@ -612,11 +480,8 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                     </div>
 
                     {/* Share Link Box */}
-                    <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        <span>Shareable Student Link:</span>
-                        <span className="text-emerald-400 font-mono">100% Portable Link</span>
-                      </div>
+                    <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Shareable Student Link:</div>
                       <div className="flex items-center space-x-2">
                         <input
                           type="text"
@@ -626,15 +491,15 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => handleCopyShareLink(mock.shareId, mock.fullConfig)}
+                          onClick={() => handleCopyShareLink(mock.shareId)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
-                            isCopied === mock.shareId
+                            isCopied
                               ? 'bg-emerald-600 text-white'
                               : 'bg-indigo-600 hover:bg-indigo-500 text-white'
                           }`}
                         >
-                          {isCopied === mock.shareId ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{isCopied === mock.shareId ? 'Copied' : 'Copy Link'}</span>
+                          {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{isCopied ? 'Copied' : 'Copy'}</span>
                         </button>
                       </div>
                     </div>
@@ -909,7 +774,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
               <label className="text-xs font-bold text-slate-200">Select Published Online Test:</label>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center space-x-2">
               <select
                 value={selectedMockShareId}
                 onChange={e => setSelectedMockShareId(e.target.value)}
@@ -921,16 +786,6 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                   </option>
                 ))}
               </select>
-
-              <button
-                type="button"
-                onClick={handleAddDemoStudentAttempt}
-                className="px-3 py-2 bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/80 rounded-xl text-xs font-bold transition-all flex items-center space-x-1"
-                title="Add sample student attempt to test Leaderboard"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ Add Demo Result</span>
-              </button>
 
               <button
                 type="button"

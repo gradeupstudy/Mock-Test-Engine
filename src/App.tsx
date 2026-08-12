@@ -422,17 +422,12 @@ export function App() {
       <OnlineStudentPortalView
         shareId={publicShareId}
         onExitPortal={() => {
+          setPublicShareId(null);
           if (typeof window !== 'undefined') {
             const url = new URL(window.location.href);
             url.searchParams.delete('publicMock');
             url.searchParams.delete('onlineTest');
             window.history.replaceState({}, '', url.toString());
-            try {
-              window.close();
-            } catch (e) {}
-            setTimeout(() => {
-              window.location.href = 'about:blank';
-            }, 300);
           }
         }}
       />
@@ -592,10 +587,7 @@ export function App() {
               mockHistory={mockHistory}
               activeTestQuestions={activeTestQuestions}
               activeTestName={activeTestName}
-              onOpenStudentPortal={(shareId) => {
-                const shareUrl = `${window.location.origin}/?publicMock=${shareId}`;
-                window.open(shareUrl, '_blank');
-              }}
+              onOpenStudentPortal={(shareId) => setPublicShareId(shareId)}
             />
           )}
         </main>
