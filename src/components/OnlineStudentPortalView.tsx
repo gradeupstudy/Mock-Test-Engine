@@ -21,7 +21,8 @@ import {
   Sparkles,
   ExternalLink,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  LogOut
 } from 'lucide-react';
 import { OnlineMockConfig, SocialMediaTask, StudentAttemptRecord } from '../types';
 
@@ -44,8 +45,25 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [mockData, setMockData] = useState<OnlineMockConfig | null>(null);
 
-  // Flow Steps: 'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT'
-  const [currentStep, setCurrentStep] = useState<'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT'>('SOCIAL_FOLLOW');
+  // Flow Steps: 'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT' | 'EXITED'
+  const [currentStep, setCurrentStep] = useState<'SOCIAL_FOLLOW' | 'REGISTRATION' | 'TEST_RUNNING' | 'SUBMITTED_RESULT' | 'EXITED'>('SOCIAL_FOLLOW');
+
+  const handleExitPortal = () => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('publicMock');
+      url.searchParams.delete('onlineTest');
+      window.history.replaceState({}, '', url.toString());
+    }
+    setCurrentStep('EXITED');
+    if (onExitPortal) {
+      onExitPortal();
+    } else {
+      try {
+        window.close();
+      } catch (_e) {}
+    }
+  };
 
   // Social Media Following Verification State
   const [visitedSocials, setVisitedSocials] = useState<Record<string, boolean>>({});
@@ -409,19 +427,47 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
             </div>
           )}
 
-          {onExitPortal && (
-            <button
-              onClick={onExitPortal}
-              className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
-            >
-              Exit Portal
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleExitPortal}
+            className="text-xs bg-rose-950/60 hover:bg-rose-900 text-rose-200 px-3.5 py-1.5 rounded-xl border border-rose-800/80 font-bold transition-colors flex items-center space-x-1 shadow-sm"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Exit Portal</span>
+          </button>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-5xl mx-auto px-4 py-6">
+        {/* ================= STEP 5: EXITED SCREEN ================= */}
+        {currentStep === 'EXITED' && (
+          <div className="max-w-md mx-auto my-12 bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center space-y-6 shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white">Portal Exited Successfully</h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                You have safely logged out and exited the Gradeup Study Mock Portal. You can now close this browser tab or window.
+              </p>
+            </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  window.close();
+                  setTimeout(() => {
+                    window.location.href = 'about:blank';
+                  }, 200);
+                }}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all shadow"
+              >
+                Close Tab / Exit Page
+              </button>
+            </div>
+          </div>
+        )}
         {/* ================= STEP 1: SOCIAL MEDIA MANDATE ================= */}
         {currentStep === 'SOCIAL_FOLLOW' && (
           <div className="max-w-2xl mx-auto bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6">

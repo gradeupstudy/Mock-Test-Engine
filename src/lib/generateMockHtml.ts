@@ -61,10 +61,13 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
           <p class="text-xs text-blue-400 font-medium">Online Interactive Test Engine</p>
         </div>
       </div>
-      <div class="text-right">
+      <div class="flex items-center gap-2">
         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
           ${escapeHtml(config.testName)}
         </span>
+        <button onclick="exitPortal()" class="px-3 py-1 rounded-lg text-xs font-bold bg-rose-950/80 text-rose-200 border border-rose-800 hover:bg-rose-900 transition no-print">
+          Exit Portal
+        </button>
       </div>
     </div>
   </header>
@@ -105,11 +108,38 @@ export function generateMockTestHtmlString(config: OnlineMockConfig): string {
       'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi', 'Jammu and Kashmir'
     ];
 
+    function exitPortal() {
+      currentStep = 'EXITED';
+      renderApp();
+      try {
+        window.close();
+      } catch (e) {}
+    }
+
     function renderApp() {
       const container = document.getElementById('app');
       if (!container) return;
 
-      if (currentStep === 'SOCIAL_FOLLOW') {
+      if (currentStep === 'EXITED') {
+        container.innerHTML = \`
+          <div class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-6 shadow-2xl">
+            <div class="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 text-3xl">
+              ✓
+            </div>
+            <div class="space-y-2">
+              <h2 class="text-2xl font-bold text-white">Portal Exited Successfully</h2>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                You have safely logged out and exited the Gradeup Study Mock Portal. You can now close this browser tab or window.
+              </p>
+            </div>
+            <div class="pt-2">
+              <button onclick="window.close(); setTimeout(function(){ window.location.href='about:blank'; }, 200);" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition shadow">
+                Close Tab / Exit Page
+              </button>
+            </div>
+          </div>
+        \`;
+      } else if (currentStep === 'SOCIAL_FOLLOW') {
         container.innerHTML = renderSocialFollowStep();
       } else if (currentStep === 'REGISTRATION') {
         container.innerHTML = renderRegistrationStep();
