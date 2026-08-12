@@ -80,51 +80,61 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
       setLoading(true);
       setErrorMsg('');
 
-      // 1. Try API fetch
       try {
-        const res = await fetch(`/api/online-mocks/${shareId}`);
-        const resText = await res.text();
-        let data: any = {};
+        // 1. Try API fetch
         try {
-          data = JSON.parse(resText);
-        } catch (_pErr) {}
+          const res = await fetch(`/api/online-mocks/${shareId}`);
+          const resText = await res.text();
+          let data: any = {};
+          try {
+            data = JSON.parse(resText);
+          } catch (_pErr) {}
 
-        if (data && data.success && data.onlineMock) {
-          if (isMounted) {
-            setMockData(data.onlineMock);
-            setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
+          if (data && data.success && data.onlineMock) {
+            if (isMounted) {
+              setMockData(data.onlineMock);
+              setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
 
-            if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
-              setCurrentStep('REGISTRATION');
-            }
-          }
-          return;
-        }
-      } catch (err) {
-        console.warn('API fetch error, falling back to local storage:', err);
-      }
-
-      // 2. Try Local Storage Fallback
-      try {
-        const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
-        if (rawLocal) {
-          const list: OnlineMockConfig[] = JSON.parse(rawLocal);
-          const found = list.find(m => m.shareId === shareId);
-          if (found && isMounted) {
-            setMockData(found);
-            setTimeLeftSeconds((found.duration || 60) * 60);
-            if (!found.socialTasks || found.socialTasks.length === 0) {
-              setCurrentStep('REGISTRATION');
+              if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
+                setCurrentStep('REGISTRATION');
+              }
+              setLoading(false);
             }
             return;
           }
+        } catch (err) {
+          console.warn('API fetch error, falling back to local storage:', err);
         }
-      } catch (_locErr) {
-        console.warn('Local storage read error:', _locErr);
-      }
 
-      if (isMounted) {
-        setErrorMsg('Failed to load online mock test. Please verify the link or share ID.');
+        // 2. Try Local Storage Fallback
+        try {
+          const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
+          if (rawLocal) {
+            const list: OnlineMockConfig[] = JSON.parse(rawLocal);
+            const found = list.find(m => m.shareId === shareId);
+            if (found && isMounted) {
+              setMockData(found);
+              setTimeLeftSeconds((found.duration || 60) * 60);
+              if (!found.socialTasks || found.socialTasks.length === 0) {
+                setCurrentStep('REGISTRATION');
+              }
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (_locErr) {
+          console.warn('Local storage read error:', _locErr);
+        }
+
+        if (isMounted) {
+          setErrorMsg('Failed to load online mock test. Please verify the link or share ID.');
+          setLoading(false);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setErrorMsg(err?.message || 'Error loading mock test.');
+          setLoading(false);
+        }
       }
     }
 
