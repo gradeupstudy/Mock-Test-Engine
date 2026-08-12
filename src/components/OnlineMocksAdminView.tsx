@@ -422,29 +422,14 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
   };
 
   // Helper to generate full public link
-  const getPublicShareUrl = (shareId: string, fullConfig?: OnlineMockConfig) => {
+  const getPublicShareUrl = (shareId: string) => {
     const origin = window.location.origin;
-    let url = `${origin}/?publicMock=${shareId}`;
-
-    let configToEncode = fullConfig;
-    if (!configToEncode) {
-      const localList = getStoredLocalMocks();
-      configToEncode = localList.find(m => m.shareId === shareId);
-    }
-
-    if (configToEncode) {
-      const encoded = encodeMockForUrl(configToEncode);
-      if (encoded) {
-        url += `&d=${encoded}`;
-      }
-    }
-
-    return url;
+    return `${origin}/?publicMock=${shareId}`;
   };
 
   // Copy Link Action
-  const handleCopyShareLink = (shareId: string, fullConfig?: OnlineMockConfig) => {
-    const url = getPublicShareUrl(shareId, fullConfig);
+  const handleCopyShareLink = (shareId: string) => {
+    const url = getPublicShareUrl(shareId);
     navigator.clipboard.writeText(url);
     setCopiedShareId(shareId);
     setTimeout(() => setCopiedShareId(''), 2500);
@@ -569,7 +554,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {publishedMocks.map((mock) => {
-                const shareUrl = getPublicShareUrl(mock.shareId, mock.fullConfig);
+                const shareUrl = getPublicShareUrl(mock.shareId);
                 const isCopied = copiedShareId === mock.shareId;
 
                 return (
@@ -623,7 +608,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => handleCopyShareLink(mock.shareId, mock.fullConfig)}
+                          onClick={() => handleCopyShareLink(mock.shareId)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
                             isCopied
                               ? 'bg-emerald-600 text-white'

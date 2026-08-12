@@ -2430,65 +2430,7 @@ app.get(["/api/online-mocks", "/online-mocks"], (_req, res) => {
 app.get(["/api/online-mocks/:shareId", "/online-mocks/:shareId"], (req, res) => {
   try {
     const { shareId } = req.params;
-    let mock = onlineMocksStore[shareId];
-
-    if (!mock) {
-      const dParam = (req.query.d || req.query.data) as string;
-      if (dParam) {
-        try {
-          let base64 = dParam.replace(/-/g, '+').replace(/_/g, '/');
-          while (base64.length % 4) {
-            base64 += '=';
-          }
-          const binaryStr = Buffer.from(base64, 'base64').toString('utf-8');
-          const percentEncoded = Array.prototype.map.call(binaryStr, (c: string) => {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-          }).join('');
-          const jsonStr = decodeURIComponent(percentEncoded);
-          const min = JSON.parse(jsonStr);
-
-          if (min && min.n && Array.isArray(min.q)) {
-            mock = {
-              shareId: shareId || min.s || `mock_${Date.now()}`,
-              testName: min.n,
-              instituteName: min.i || 'Gradeup Study',
-              duration: parseSafeNumber(min.d, 60),
-              totalMarks: parseSafeNumber(min.tm, min.q.length * (min.mq || 2)),
-              marksPerQuestion: parseSafeNumber(min.mq, 2),
-              negativeMarksPerQuestion: parseSafeNumber(min.nm, 0.5),
-              socialTasks: Array.isArray(min.st) ? min.st.map((t: any) => ({
-                id: t.id || `task_${Math.random().toString(36).substring(2, 7)}`,
-                platform: t.p || 'telegram',
-                title: t.t || 'Follow Channel',
-                url: t.u || '#',
-                isRequired: t.r !== false
-              })) : [],
-              questions: min.q.map((q: any, idx: number) => ({
-                id: q.id || idx + 1,
-                subject: q.sub || 'General',
-                chapter: q.ch || 'General',
-                question: q.q,
-                translation: q.tr,
-                optionA: q.a,
-                optionB: q.b,
-                optionC: q.c,
-                optionD: q.d,
-                answer: q.ans,
-                explanation: q.exp
-              })),
-              createdDate: new Date().toISOString(),
-              instructions: "Select the correct option for each question. Time limit is strictly enforced.",
-              isActive: true,
-              attempts: []
-            };
-            onlineMocksStore[shareId] = mock;
-            saveOnlineMocksStore();
-          }
-        } catch (e) {
-          console.warn("Failed to auto-hydrate mock from d query param in GET handler:", e);
-        }
-      }
-    }
+    const mock = onlineMocksStore[shareId];
 
     if (!mock) {
       return res.status(404).json({ success: false, error: "Online Mock Test not found or invalid link." });

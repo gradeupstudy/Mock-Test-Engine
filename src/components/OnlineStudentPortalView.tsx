@@ -140,7 +140,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
 
         // 1. Try API fetch
         try {
-          const apiUrl = `/api/online-mocks/${shareId}${encodedParam ? `?d=${encodeURIComponent(encodedParam)}` : ''}`;
+          const apiUrl = `/api/online-mocks/${shareId}`;
           const res = await fetch(apiUrl);
           const resText = await res.text();
           let data: any = {};
@@ -161,7 +161,7 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
             return;
           }
         } catch (err) {
-          console.warn('API fetch error, falling back to URL payload/local storage:', err);
+          console.warn('API fetch error, falling back to local storage:', err);
         }
 
         // 2. Try URL Encoded Payload Fallback
