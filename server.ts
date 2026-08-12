@@ -20,6 +20,18 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
+
+  // Normalize API URL if Vercel serverless proxy strips the /api prefix
+  if (req.url && !req.url.startsWith("/api") && (
+    req.url.startsWith("/online-mocks") ||
+    req.url.startsWith("/genai") ||
+    req.url.startsWith("/translate") ||
+    req.url.startsWith("/s3-") ||
+    req.url.startsWith("/gemini-key")
+  )) {
+    req.url = "/api" + req.url;
+  }
+
   next();
 });
 
