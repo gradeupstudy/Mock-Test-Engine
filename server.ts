@@ -2332,7 +2332,7 @@ function parseSafeNumber(val: any, fallback: number): number {
 }
 
 // 1. Create or Update Published Online Mock
-app.post("/api/online-mocks", (req, res) => {
+app.post(["/api/online-mocks", "/online-mocks"], (req, res) => {
   try {
     const {
       shareId,
@@ -2397,7 +2397,7 @@ app.post("/api/online-mocks", (req, res) => {
 });
 
 // 2. List all published online mocks (For Admin)
-app.get("/api/online-mocks", (_req, res) => {
+app.get(["/api/online-mocks", "/online-mocks"], (_req, res) => {
   try {
     const list = Object.values(onlineMocksStore).map(m => {
       const attemptsCount = m.attempts ? m.attempts.length : 0;
@@ -2427,7 +2427,7 @@ app.get("/api/online-mocks", (_req, res) => {
 });
 
 // 3. Get Public Details of a Published Online Mock (For Student Portal)
-app.get("/api/online-mocks/:shareId", (req, res) => {
+app.get(["/api/online-mocks/:shareId", "/online-mocks/:shareId"], (req, res) => {
   try {
     const { shareId } = req.params;
     const mock = onlineMocksStore[shareId];
@@ -2476,7 +2476,7 @@ app.get("/api/online-mocks/:shareId", (req, res) => {
 });
 
 // 4. Submit Student Attempt & Live Rank Calculation
-app.post("/api/online-mocks/:shareId/submit", (req, res) => {
+app.post(["/api/online-mocks/:shareId/submit", "/online-mocks/:shareId/submit"], (req, res) => {
   try {
     const { shareId } = req.params;
     const {
@@ -2580,7 +2580,7 @@ app.post("/api/online-mocks/:shareId/submit", (req, res) => {
 });
 
 // 5. Get Results & Topper List for Admin
-app.get("/api/online-mocks/:shareId/results", (req, res) => {
+app.get(["/api/online-mocks/:shareId/results", "/online-mocks/:shareId/results"], (req, res) => {
   try {
     const { shareId } = req.params;
     const mock = onlineMocksStore[shareId];
@@ -2623,7 +2623,7 @@ app.get("/api/online-mocks/:shareId/results", (req, res) => {
 });
 
 // 6. Delete Published Online Mock
-app.delete("/api/online-mocks/:shareId", (req, res) => {
+app.delete(["/api/online-mocks/:shareId", "/online-mocks/:shareId"], (req, res) => {
   try {
     const { shareId } = req.params;
     if (onlineMocksStore[shareId]) {

@@ -79,34 +79,52 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     async function fetchMock() {
       setLoading(true);
       setErrorMsg('');
+
+      // 1. Try API fetch
       try {
         const res = await fetch(`/api/online-mocks/${shareId}`);
         const resText = await res.text();
         let data: any = {};
         try {
           data = JSON.parse(resText);
-        } catch (_pErr) {
-          throw new Error(resText ? resText.slice(0, 120) : `Server HTTP Error ${res.status}`);
-        }
+        } catch (_pErr) {}
 
-        if (!data.success || !data.onlineMock) {
-          if (isMounted) setErrorMsg(data.error || 'Failed to load online mock test.');
+        if (data && data.success && data.onlineMock) {
+          if (isMounted) {
+            setMockData(data.onlineMock);
+            setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
+
+            if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
+              setCurrentStep('REGISTRATION');
+            }
+          }
           return;
         }
+      } catch (err) {
+        console.warn('API fetch error, falling back to local storage:', err);
+      }
 
-        if (isMounted) {
-          setMockData(data.onlineMock);
-          setTimeLeftSeconds((data.onlineMock.duration || 60) * 60);
-
-          // If no social tasks required, skip to registration
-          if (!data.onlineMock.socialTasks || data.onlineMock.socialTasks.length === 0) {
-            setCurrentStep('REGISTRATION');
+      // 2. Try Local Storage Fallback
+      try {
+        const rawLocal = localStorage.getItem('gradeup_published_mocks_v1');
+        if (rawLocal) {
+          const list: OnlineMockConfig[] = JSON.parse(rawLocal);
+          const found = list.find(m => m.shareId === shareId);
+          if (found && isMounted) {
+            setMockData(found);
+            setTimeLeftSeconds((found.duration || 60) * 60);
+            if (!found.socialTasks || found.socialTasks.length === 0) {
+              setCurrentStep('REGISTRATION');
+            }
+            return;
           }
         }
-      } catch (err: any) {
-        if (isMounted) setErrorMsg(err.message || 'Network error. Please check internet connection.');
-      } finally {
-        if (isMounted) setLoading(false);
+      } catch (_locErr) {
+        console.warn('Local storage read error:', _locErr);
+      }
+
+      if (isMounted) {
+        setErrorMsg('Failed to load online mock test. Please verify the link or share ID.');
       }
     }
 
@@ -199,20 +217,22 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
     }
 
     setIsSubmitting(true);
+    const totalDuration = (mockData?.duration || 60) * 60;
+    const timeTaken = totalDuration - timeLeftSeconds;
+
+    const payload = {
+      studentName,
+      mobileNo,
+      state,
+      district,
+      socialsFollowed: isSocialsConfirmed,
+      answers: userAnswers,
+      timeTakenSeconds: timeTaken
+    };
+
+    let resultData: any = null;
+
     try {
-      const totalDuration = (mockData?.duration || 60) * 60;
-      const timeTaken = totalDuration - timeLeftSeconds;
-
-      const payload = {
-        studentName,
-        mobileNo,
-        state,
-        district,
-        socialsFollowed: isSocialsConfirmed,
-        answers: userAnswers,
-        timeTakenSeconds: timeTaken
-      };
-
       const res = await fetch(`/api/online-mocks/${shareId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -220,25 +240,78 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
       });
 
       const resText = await res.text();
-      let data: any = {};
       try {
-        data = JSON.parse(resText);
-      } catch (_pErr) {
-        throw new Error(resText ? resText.slice(0, 150) : `Server HTTP Error ${res.status}`);
-      }
-
-      if (!res.ok || !data.success) {
-        alert(`Submission Error: ${data.error || data.message || `Server Error (${res.status})`}`);
-        return;
-      }
-
-      setSubmissionResult(data);
-      setCurrentStep('SUBMITTED_RESULT');
-    } catch (err: any) {
-      alert(`Submission Failed: ${err.message || 'Please check connection and try again.'}`);
-    } finally {
-      setIsSubmitting(false);
+        const parsed = JSON.parse(resText);
+        if (res.ok && parsed.success) {
+          resultData = parsed;
+        }
+      } catch (_pErr) {}
+    } catch (_netErr) {
+      console.warn('Backend submit warning (using local scoring fallback):', _netErr);
     }
+
+    // Fallback local score calculation if backend failed or unavailable
+    if (!resultData && mockData) {
+      let correct = 0;
+      let incorrect = 0;
+      let unattempted = 0;
+      const marksPerQ = mockData.marksPerQuestion || 2;
+      const negMarksPerQ = mockData.negativeMarksPerQuestion || 0.5;
+
+      mockData.questions.forEach((q, idx) => {
+        const qKey = q.id || idx + 1;
+        const userAns = userAnswers[qKey];
+        if (!userAns) {
+          unattempted++;
+        } else if (userAns === q.answer) {
+          correct++;
+        } else {
+          incorrect++;
+        }
+      });
+
+      const rawScore = (correct * marksPerQ) - (incorrect * negMarksPerQ);
+      const score = Math.max(0, rawScore);
+      const totalMarks = mockData.questions.length * marksPerQ;
+      const percentage = Math.round((score / totalMarks) * 100);
+
+      const attemptRec: StudentAttemptRecord = {
+        id: `att_${Date.now()}`,
+        shareId,
+        testName: mockData.testName,
+        studentName,
+        mobileNo,
+        state,
+        district,
+        socialsFollowed: isSocialsConfirmed,
+        score,
+        totalMarks,
+        percentage,
+        correctCount: correct,
+        incorrectCount: incorrect,
+        unattemptedCount: unattempted,
+        timeTakenSeconds: timeTaken,
+        submittedAt: new Date().toISOString(),
+        answers: userAnswers,
+        rank: 1
+      };
+
+      resultData = {
+        success: true,
+        attempt: attemptRec,
+        rank: 1,
+        totalAttempts: 1,
+        topRankers: [attemptRec]
+      };
+    }
+
+    if (resultData) {
+      setSubmissionResult(resultData);
+      setCurrentStep('SUBMITTED_RESULT');
+    } else {
+      alert('Failed to process test submission. Please try again.');
+    }
+    setIsSubmitting(false);
   };
 
   // Time formatter

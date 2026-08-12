@@ -24,6 +24,26 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { MockHistory, OnlineMockConfig, SocialMediaTask, StudentAttemptRecord, Question } from '../types';
+import { downloadMockHtmlFile } from '../lib/generateMockHtml';
+
+const LOCAL_STORAGE_MOCKS_KEY = 'gradeup_published_mocks_v1';
+
+const getStoredLocalMocks = (): OnlineMockConfig[] => {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_MOCKS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveStoredLocalMocks = (list: OnlineMockConfig[]) => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_MOCKS_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.warn('Failed to save local mocks:', e);
+  }
+};
 
 interface OnlineMocksAdminViewProps {
   mockHistory: MockHistory[];
@@ -98,23 +118,45 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [publishStatusMsg, setPublishStatusMsg] = useState<string>('');
 
-  // Fetch all published tests from server
+  // Fetch all published tests from server and combine with local storage
   const fetchPublishedMocks = async () => {
     setLoading(true);
+    let combinedMocks: any[] = [];
+    const localList = getStoredLocalMocks();
+
     try {
       const res = await fetch('/api/online-mocks');
       const data = await res.json();
       if (data.success && Array.isArray(data.mocks)) {
-        setPublishedMocks(data.mocks);
-        if (data.mocks.length > 0 && !selectedMockShareId) {
-          setSelectedMockShareId(data.mocks[0].shareId);
-        }
+        combinedMocks = data.mocks;
       }
     } catch (e) {
-      console.warn('Failed to fetch online mocks list:', e);
-    } finally {
-      setLoading(false);
+      console.warn('Failed to fetch online mocks list from server:', e);
     }
+
+    // Merge local storage mocks if not already in server list
+    localList.forEach(loc => {
+      if (!combinedMocks.some(m => m.shareId === loc.shareId)) {
+        combinedMocks.unshift({
+          shareId: loc.shareId,
+          testName: loc.testName,
+          instituteName: loc.instituteName || 'Gradeup Study',
+          questionCount: loc.questions ? loc.questions.length : 0,
+          duration: loc.duration,
+          socialTasksCount: loc.socialTasks ? loc.socialTasks.length : 0,
+          totalAttempts: 0,
+          avgScore: 0,
+          createdDate: loc.createdDate,
+          fullConfig: loc
+        });
+      }
+    });
+
+    setPublishedMocks(combinedMocks);
+    if (combinedMocks.length > 0 && !selectedMockShareId) {
+      setSelectedMockShareId(combinedMocks[0].shareId);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -163,7 +205,7 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     setSocialTasks(prev => prev.filter(t => t.id !== id));
   };
 
-  // Publish Test Action
+  // Publish Test Action -> Generates Standalone Interactive HTML File + Local Sync
   const handlePublishOnlineMock = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -186,14 +228,18 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
     }
 
     setIsPublishing(true);
-    setPublishStatusMsg('Publishing online mock test & linking social media channels...');
+    setPublishStatusMsg('Generating standalone test HTML file & publishing mock test...');
 
     try {
       const parsedDuration = isNaN(Number(durationMinutes)) ? 60 : Number(durationMinutes);
       const parsedMarksPerQ = isNaN(Number(marksPerQ)) ? 2 : Number(marksPerQ);
       const parsedNegMarksPerQ = isNaN(Number(negativeMarksPerQ)) ? 0.5 : Number(negativeMarksPerQ);
 
-      const payload = {
+      const shareId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const fullConfig: OnlineMockConfig = {
+        shareId,
+        mockId: selectedMockForPublish !== 'CURRENT' ? Number(selectedMockForPublish) : undefined,
         testName: nameToPublish || 'Online Mock Test',
         instituteName: instituteName || 'Gradeup Study',
         duration: parsedDuration,
@@ -202,34 +248,36 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
         negativeMarksPerQuestion: parsedNegMarksPerQ,
         socialTasks: socialTasks || [],
         questions: questionsToPublish,
+        createdDate: new Date().toISOString(),
         isActive: true
       };
 
-      const res = await fetch('/api/online-mocks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      // 1. Download Standalone Interactive HTML file
+      downloadMockHtmlFile(fullConfig);
 
-      const resText = await res.text();
-      let data: any = {};
+      // 2. Save locally so it works even offline or serverless
+      const existingLocal = getStoredLocalMocks();
+      saveStoredLocalMocks([fullConfig, ...existingLocal]);
+
+      // 3. Sync to API if backend server is available
       try {
-        data = JSON.parse(resText);
-      } catch (_parseErr) {
-        throw new Error(resText ? resText.slice(0, 150) : `Server HTTP Error ${res.status}`);
+        await fetch('/api/online-mocks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fullConfig)
+        });
+      } catch (_apiErr) {
+        console.warn('API sync warning (using standalone HTML & local mode):', _apiErr);
       }
 
-      if (!res.ok || !data.success) {
-        alert(`Failed to publish: ${data.error || data.message || `Server returned status ${res.status}`}`);
-        return;
-      }
-
-      setPublishStatusMsg(`Successfully published! Share link created.`);
+      setPublishStatusMsg(`Successfully generated HTML file & published mock test!`);
       await fetchPublishedMocks();
-      setSelectedMockShareId(data.shareId);
+      setSelectedMockShareId(shareId);
       setActiveTab('PUBLISHED_TESTS');
+
+      alert(`✅ Mock Test Published & HTML File Downloaded!\n\n1. Standalone HTML file "${fullConfig.testName}.html" has been downloaded to your device.\n2. You can share this HTML file directly with students on WhatsApp/Telegram!\n3. When students open this HTML file, they will first follow social channels, fill their details, and attempt the interactive test.`);
     } catch (err: any) {
-      alert(`Publish Failed: ${err.message || 'Please check your connection and try again.'}`);
+      alert(`Publish Error: ${err.message || 'Failed to generate test file.'}`);
     } finally {
       setIsPublishing(false);
     }
@@ -457,8 +505,32 @@ export const OnlineMocksAdminView: React.FC<OnlineMocksAdminViewProps> = ({
                     </div>
 
                     {/* Action Bar */}
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center space-x-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (mock.fullConfig) {
+                              downloadMockHtmlFile(mock.fullConfig);
+                            } else {
+                              fetch(`/api/online-mocks/${mock.shareId}`)
+                                .then(res => res.json())
+                                .then(data => {
+                                  if (data.success && data.onlineMock) {
+                                    downloadMockHtmlFile(data.onlineMock);
+                                  } else {
+                                    alert('Could not generate HTML file for this test.');
+                                  }
+                                })
+                                .catch(() => alert('Failed to download test HTML file.'));
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-emerald-700/80 hover:bg-emerald-600 text-white border border-emerald-500/60 text-xs font-bold rounded-lg transition-colors flex items-center space-x-1 shadow-sm"
+                          title="Download Standalone HTML File for WhatsApp / Telegram sharing"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download HTML File</span>
+                        </button>
+
                         <button
                           onClick={() => {
                             setSelectedMockShareId(mock.shareId);
