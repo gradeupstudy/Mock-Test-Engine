@@ -1,8 +1,9 @@
+import { deflate, inflate } from 'pako';
 import { OnlineMockConfig } from '../types';
 
 /**
- * Encodes an OnlineMockConfig into a compact, URL-safe Base64 string
- * so share links remain valid even across serverless restarts.
+ * Encodes an OnlineMockConfig into an ultra-compact zlib-compressed URL-safe Base64 string
+ * so portable fallback links stay under ~1,000 characters and never trigger URI_TOO_LONG errors.
  */
 export function encodeMockForUrl(config: OnlineMockConfig): string {
   try {
@@ -37,19 +38,27 @@ export function encodeMockForUrl(config: OnlineMockConfig): string {
     };
 
     const jsonStr = JSON.stringify(minified);
-    const encoded = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (_match, p1) => {
-      return String.fromCharCode(parseInt(p1, 16));
-    }));
+    // Compress with zlib deflate
+    const compressed = deflate(jsonStr);
 
-    return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // Convert Uint8Array to binary string
+    let binary = '';
+    const len = compressed.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(compressed[i]);
+    }
+
+    const base64 = btoa(binary);
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   } catch (e) {
-    console.warn('Failed to encode mock for URL:', e);
+    console.warn('Failed to encode mock for URL with pako:', e);
     return '';
   }
 }
 
 /**
- * Decodes a URL-safe Base64 string back into an OnlineMockConfig object.
+ * Decodes a URL-safe Base64 string back into an OnlineMockConfig object,
+ * handling both pako zlib-compressed strings and legacy uncompressed strings.
  */
 export function decodeMockFromUrl(encodedStr: string): OnlineMockConfig | null {
   if (!encodedStr || typeof encodedStr !== 'string') return null;
@@ -61,11 +70,23 @@ export function decodeMockFromUrl(encodedStr: string): OnlineMockConfig | null {
     }
 
     const binaryStr = atob(base64);
-    const percentEncoded = Array.prototype.map.call(binaryStr, (c: string) => {
-      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join('');
+    let jsonStr = '';
 
-    const jsonStr = decodeURIComponent(percentEncoded);
+    // Try pako inflate first
+    try {
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      jsonStr = inflate(bytes, { to: 'string' });
+    } catch (_inflateErr) {
+      // Fallback for legacy uncompressed base64 strings
+      const percentEncoded = Array.prototype.map.call(binaryStr, (c: string) => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join('');
+      jsonStr = decodeURIComponent(percentEncoded);
+    }
+
     const min = JSON.parse(jsonStr);
 
     if (!min || !min.n || !Array.isArray(min.q)) {
@@ -108,3 +129,4 @@ export function decodeMockFromUrl(encodedStr: string): OnlineMockConfig | null {
     return null;
   }
 }
+

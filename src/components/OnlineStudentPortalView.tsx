@@ -136,11 +136,11 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
 
       try {
         const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-        const encodedParam = searchParams.get('d') || searchParams.get('data');
+        const encodedParam = searchParams.get('c') || searchParams.get('d') || searchParams.get('data');
 
         // 1. Try API fetch
         try {
-          const apiUrl = `/api/online-mocks/${shareId}`;
+          const apiUrl = `/api/online-mocks/${shareId}${encodedParam ? `?c=${encodeURIComponent(encodedParam)}` : ''}`;
           const res = await fetch(apiUrl);
           const resText = await res.text();
           let data: any = {};
@@ -457,14 +457,25 @@ export const OnlineStudentPortalView: React.FC<OnlineStudentPortalViewProps> = (
           </div>
           <h2 className="text-xl font-bold text-slate-100">Unable to Open Mock Test</h2>
           <p className="text-sm text-slate-400">{errorMsg || 'Mock Test not found.'}</p>
-          {onExitPortal && (
+          
+          <div className="pt-2 space-y-2">
             <button
-              onClick={onExitPortal}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all"
+              onClick={() => window.location.reload()}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2"
             >
-              Back to App
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Loading Test</span>
             </button>
-          )}
+
+            {onExitPortal && (
+              <button
+                onClick={onExitPortal}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+              >
+                Back to App
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );

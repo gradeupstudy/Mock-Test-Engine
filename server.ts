@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import zlib from "zlib";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { S3Client, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
@@ -2264,22 +2265,11 @@ app.post("/api/r2/delete", async (req, res) => {
 // ONLINE MOCK TESTS & LIVE RESULT SYNC API
 // ==========================================
 
-function getWritableStorePath(): string {
-  if (process.env.VERCEL) {
-    return path.join("/tmp", "online_mocks_store.json");
-  }
-  const cwdPath = path.join(process.cwd(), "online_mocks_store.json");
-  try {
-    const testFile = path.join(process.cwd(), ".write_test_tmp");
-    fs.writeFileSync(testFile, "test");
-    fs.unlinkSync(testFile);
-    return cwdPath;
-  } catch (_e) {
-    return path.join("/tmp", "online_mocks_store.json");
-  }
-}
-
-const ONLINE_MOCKS_FILE = getWritableStorePath();
+const STORE_PATHS = [
+  path.join(process.cwd(), "online_mocks_store.json"),
+  path.join(process.cwd(), "src", "data", "online_mocks_store.json"),
+  path.join("/tmp", "online_mocks_store.json")
+];
 
 interface ServerOnlineMock {
   shareId: string;
@@ -2300,27 +2290,32 @@ interface ServerOnlineMock {
 
 let onlineMocksStore: Record<string, ServerOnlineMock> = {};
 
-try {
-  if (fs.existsSync(ONLINE_MOCKS_FILE)) {
-    const rawData = fs.readFileSync(ONLINE_MOCKS_FILE, "utf-8");
-    onlineMocksStore = JSON.parse(rawData);
-  } else {
-    // Try reading from process.cwd() as fallback if read-only cwd has initial data
-    const altPath = path.join(process.cwd(), "online_mocks_store.json");
-    if (fs.existsSync(altPath)) {
-      const rawData = fs.readFileSync(altPath, "utf-8");
-      onlineMocksStore = JSON.parse(rawData);
+// Load & merge mock tests from all available store locations on startup
+for (const storePath of STORE_PATHS) {
+  try {
+    if (fs.existsSync(storePath)) {
+      const rawData = fs.readFileSync(storePath, "utf-8");
+      const parsed = JSON.parse(rawData);
+      if (parsed && typeof parsed === "object") {
+        onlineMocksStore = { ...parsed, ...onlineMocksStore };
+      }
     }
+  } catch (e) {
+    console.warn(`Could not read store path ${storePath}:`, e);
   }
-} catch (e) {
-  console.warn("Could not read online_mocks_store.json, starting fresh.", e);
 }
 
 function saveOnlineMocksStore() {
-  try {
-    fs.writeFileSync(ONLINE_MOCKS_FILE, JSON.stringify(onlineMocksStore, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to save online_mocks_store.json", e);
+  for (const storePath of STORE_PATHS) {
+    try {
+      const dir = path.dirname(storePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(storePath, JSON.stringify(onlineMocksStore, null, 2), "utf-8");
+    } catch (_e) {
+      // Ignore write errors if a path happens to be read-only
+    }
   }
 }
 
@@ -2430,7 +2425,75 @@ app.get(["/api/online-mocks", "/online-mocks"], (_req, res) => {
 app.get(["/api/online-mocks/:shareId", "/online-mocks/:shareId"], (req, res) => {
   try {
     const { shareId } = req.params;
-    const mock = onlineMocksStore[shareId];
+    let mock = onlineMocksStore[shareId];
+
+    // Auto-recovery via short query parameter 'c' (zlib compressed) or 'd' (legacy base64)
+    if (!mock) {
+      const cParam = (req.query.c || req.query.d || req.query.data) as string;
+      if (cParam) {
+        try {
+          let base64 = cParam.replace(/-/g, '+').replace(/_/g, '/');
+          while (base64.length % 4) {
+            base64 += '=';
+          }
+          const buffer = Buffer.from(base64, 'base64');
+          let jsonStr = '';
+
+          // Try zlib inflate first
+          try {
+            jsonStr = zlib.inflateSync(buffer).toString('utf-8');
+          } catch (_inflateErr) {
+            // Fallback for uncompressed base64
+            const binaryStr = buffer.toString('utf-8');
+            const percentEncoded = Array.prototype.map.call(binaryStr, (c: string) => {
+              return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join('');
+            jsonStr = decodeURIComponent(percentEncoded);
+          }
+
+          const min = JSON.parse(jsonStr);
+          if (min && min.n && Array.isArray(min.q)) {
+            mock = {
+              shareId: shareId || min.s || `mock_${Date.now()}`,
+              testName: min.n,
+              instituteName: min.i || 'Gradeup Study',
+              duration: parseSafeNumber(min.d, 60),
+              totalMarks: parseSafeNumber(min.tm, min.q.length * (min.mq || 2)),
+              marksPerQuestion: parseSafeNumber(min.mq, 2),
+              negativeMarksPerQuestion: parseSafeNumber(min.nm, 0.5),
+              socialTasks: Array.isArray(min.st) ? min.st.map((t: any) => ({
+                id: t.id || `task_${Math.random().toString(36).substring(2, 7)}`,
+                platform: t.p || 'telegram',
+                title: t.t || 'Follow Channel',
+                url: t.u || '#',
+                isRequired: t.r !== false
+              })) : [],
+              questions: min.q.map((q: any, idx: number) => ({
+                id: q.id || idx + 1,
+                subject: q.sub || 'General',
+                chapter: q.ch || 'General',
+                question: q.q,
+                translation: q.tr,
+                optionA: q.a,
+                optionB: q.b,
+                optionC: q.c,
+                optionD: q.d,
+                answer: q.ans,
+                explanation: q.exp
+              })),
+              createdDate: new Date().toISOString(),
+              instructions: "Select the correct option for each question. Time limit is strictly enforced.",
+              isActive: true,
+              attempts: []
+            };
+            onlineMocksStore[shareId] = mock;
+            saveOnlineMocksStore();
+          }
+        } catch (e) {
+          console.warn("Failed to auto-hydrate mock from query param in GET handler:", e);
+        }
+      }
+    }
 
     if (!mock) {
       return res.status(404).json({ success: false, error: "Online Mock Test not found or invalid link." });
