@@ -13,7 +13,8 @@ import {
   Key,
   ShieldCheck,
   Menu,
-  X
+  X,
+  Globe
 } from 'lucide-react';
 import { AiConfig } from '../types';
 import { AiEngineIndicator } from './AiEngineIndicator';
@@ -28,7 +29,8 @@ export type ActiveModule =
   | 'templates'
   | 'export'
   | 'analytics'
-  | 'backup';
+  | 'backup'
+  | 'online_mocks';
 
 interface NavbarProps {
   onOpenGeminiModal: () => void;
@@ -108,6 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'creator', label: 'Mock Test Creator', icon: Brain },
     { id: 'preview', label: 'Test Preview', icon: SquarePen },
     { id: 'templates', label: 'Templates', icon: Paintbrush },
+    { id: 'online_mocks', label: 'Online Share & Results', icon: Globe },
     { id: 'export', label: 'Export', icon: Download },
     { id: 'analytics', label: 'Analytics', icon: BarChart2 },
     { id: 'backup', label: 'Backup', icon: Database },

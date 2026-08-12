@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -2245,6 +2246,348 @@ app.post("/api/r2/delete", async (req, res) => {
   } catch (error: any) {
     console.warn("Cloudflare R2 Delete Error:", error.message);
     return res.status(500).json({ success: false, error: error.message || "Failed to delete file from Cloudflare R2." });
+  }
+});
+
+// ==========================================
+// ONLINE MOCK TESTS & LIVE RESULT SYNC API
+// ==========================================
+
+const ONLINE_MOCKS_FILE = path.join(process.cwd(), "online_mocks_store.json");
+
+interface ServerOnlineMock {
+  shareId: string;
+  mockId?: number;
+  testName: string;
+  instituteName?: string;
+  duration: number;
+  totalMarks: number;
+  marksPerQuestion: number;
+  negativeMarksPerQuestion: number;
+  socialTasks: any[];
+  questions: any[];
+  createdDate: string;
+  instructions?: string;
+  isActive: boolean;
+  attempts: any[];
+}
+
+let onlineMocksStore: Record<string, ServerOnlineMock> = {};
+
+try {
+  if (fs.existsSync(ONLINE_MOCKS_FILE)) {
+    const rawData = fs.readFileSync(ONLINE_MOCKS_FILE, "utf-8");
+    onlineMocksStore = JSON.parse(rawData);
+  }
+} catch (e) {
+  console.warn("Could not read online_mocks_store.json, starting fresh.", e);
+}
+
+function saveOnlineMocksStore() {
+  try {
+    fs.writeFileSync(ONLINE_MOCKS_FILE, JSON.stringify(onlineMocksStore, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Failed to save online_mocks_store.json", e);
+  }
+}
+
+// 1. Create or Update Published Online Mock
+app.post("/api/online-mocks", (req, res) => {
+  try {
+    const {
+      shareId,
+      mockId,
+      testName,
+      instituteName,
+      duration,
+      totalMarks,
+      marksPerQuestion,
+      negativeMarksPerQuestion,
+      socialTasks,
+      questions,
+      instructions,
+      isActive
+    } = req.body;
+
+    if (!testName || !questions || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, error: "Test name and valid question list are required." });
+    }
+
+    const sid = shareId && shareId.trim() ? shareId.trim() : `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const existing = onlineMocksStore[sid];
+
+    const mockRecord: ServerOnlineMock = {
+      shareId: sid,
+      mockId: mockId || (existing ? existing.mockId : Date.now()),
+      testName: testName.trim(),
+      instituteName: (instituteName || "Gradeup Study").trim(),
+      duration: Number(duration) || 60,
+      totalMarks: Number(totalMarks) || (questions.length * 2),
+      marksPerQuestion: Number(marksPerQuestion) || 2,
+      negativeMarksPerQuestion: Number(negativeMarksPerQuestion) || 0.5,
+      socialTasks: Array.isArray(socialTasks) ? socialTasks : [],
+      questions,
+      createdDate: existing ? existing.createdDate : new Date().toISOString(),
+      instructions: instructions || "Select the correct option for each question. Time limit is strictly enforced.",
+      isActive: isActive !== false,
+      attempts: existing ? existing.attempts || [] : []
+    };
+
+    onlineMocksStore[sid] = mockRecord;
+    saveOnlineMocksStore();
+
+    return res.json({
+      success: true,
+      shareId: sid,
+      message: `Online Mock Test "${testName}" successfully published!`,
+      onlineMock: {
+        ...mockRecord,
+        totalAttempts: mockRecord.attempts.length
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to publish online mock." });
+  }
+});
+
+// 2. List all published online mocks (For Admin)
+app.get("/api/online-mocks", (_req, res) => {
+  try {
+    const list = Object.values(onlineMocksStore).map(m => {
+      const attemptsCount = m.attempts ? m.attempts.length : 0;
+      const totalScoreSum = m.attempts ? m.attempts.reduce((acc, curr) => acc + (curr.score || 0), 0) : 0;
+      const avgScore = attemptsCount > 0 ? Math.round((totalScoreSum / attemptsCount) * 10) / 10 : 0;
+      return {
+        shareId: m.shareId,
+        mockId: m.mockId,
+        testName: m.testName,
+        instituteName: m.instituteName,
+        duration: m.duration,
+        totalMarks: m.totalMarks,
+        questionCount: m.questions ? m.questions.length : 0,
+        socialTasksCount: m.socialTasks ? m.socialTasks.length : 0,
+        createdDate: m.createdDate,
+        isActive: m.isActive,
+        totalAttempts: attemptsCount,
+        avgScore
+      };
+    });
+
+    list.sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
+    return res.json({ success: true, mocks: list });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to list online mocks." });
+  }
+});
+
+// 3. Get Public Details of a Published Online Mock (For Student Portal)
+app.get("/api/online-mocks/:shareId", (req, res) => {
+  try {
+    const { shareId } = req.params;
+    const mock = onlineMocksStore[shareId];
+
+    if (!mock) {
+      return res.status(404).json({ success: false, error: "Online Mock Test not found or invalid link." });
+    }
+
+    if (!mock.isActive) {
+      return res.status(403).json({ success: false, error: "This Mock Test has been closed or paused by the administrator." });
+    }
+
+    const sanitizedQuestions = (mock.questions || []).map((q, idx) => ({
+      id: q.id || idx + 1,
+      subject: q.subject || "General",
+      chapter: q.chapter || "General",
+      question: q.question,
+      translation: q.translation,
+      optionA: q.optionA,
+      optionB: q.optionB,
+      optionC: q.optionC,
+      optionD: q.optionD,
+      answer: q.answer,
+      explanation: q.explanation
+    }));
+
+    return res.json({
+      success: true,
+      onlineMock: {
+        shareId: mock.shareId,
+        testName: mock.testName,
+        instituteName: mock.instituteName,
+        duration: mock.duration,
+        totalMarks: mock.totalMarks,
+        marksPerQuestion: mock.marksPerQuestion,
+        negativeMarksPerQuestion: mock.negativeMarksPerQuestion,
+        socialTasks: mock.socialTasks || [],
+        instructions: mock.instructions,
+        questions: sanitizedQuestions,
+        totalAttempts: mock.attempts ? mock.attempts.length : 0
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to load online mock." });
+  }
+});
+
+// 4. Submit Student Attempt & Live Rank Calculation
+app.post("/api/online-mocks/:shareId/submit", (req, res) => {
+  try {
+    const { shareId } = req.params;
+    const {
+      studentName,
+      mobileNo,
+      state,
+      district,
+      socialsFollowed,
+      answers,
+      timeTakenSeconds
+    } = req.body;
+
+    const mock = onlineMocksStore[shareId];
+    if (!mock) {
+      return res.status(404).json({ success: false, error: "Online Mock Test not found." });
+    }
+
+    if (!studentName || !mobileNo || !state || !district) {
+      return res.status(400).json({ success: false, error: "Please provide Name, Mobile No, State, and District." });
+    }
+
+    const posMark = mock.marksPerQuestion || 2;
+    const negMark = mock.negativeMarksPerQuestion || 0;
+    let correctCount = 0;
+    let incorrectCount = 0;
+    let unattemptedCount = 0;
+
+    const userAnswers: Record<number, 'A' | 'B' | 'C' | 'D'> = answers || {};
+
+    (mock.questions || []).forEach((q, idx) => {
+      const qKey = q.id || idx + 1;
+      const userAns = userAnswers[qKey] || userAnswers[idx];
+      if (!userAns) {
+        unattemptedCount++;
+      } else if (userAns === q.answer) {
+        correctCount++;
+      } else {
+        incorrectCount++;
+      }
+    });
+
+    const calculatedScore = Math.max(0, (correctCount * posMark) - (incorrectCount * negMark));
+    const percentage = Math.round((calculatedScore / (mock.totalMarks || 1)) * 1000) / 10;
+
+    const attemptRecord = {
+      id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      shareId,
+      testName: mock.testName,
+      studentName: String(studentName).trim(),
+      mobileNo: String(mobileNo).trim(),
+      state: String(state).trim(),
+      district: String(district).trim(),
+      socialsFollowed: Boolean(socialsFollowed),
+      score: calculatedScore,
+      totalMarks: mock.totalMarks,
+      percentage,
+      correctCount,
+      incorrectCount,
+      unattemptedCount,
+      timeTakenSeconds: Number(timeTakenSeconds) || 0,
+      submittedAt: new Date().toISOString(),
+      answers: userAnswers
+    };
+
+    if (!mock.attempts) mock.attempts = [];
+    mock.attempts.push(attemptRecord);
+    saveOnlineMocksStore();
+
+    const sortedAttempts = [...mock.attempts].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.timeTakenSeconds - b.timeTakenSeconds;
+    });
+
+    const rank = sortedAttempts.findIndex(a => a.id === attemptRecord.id) + 1;
+    const totalAttempts = sortedAttempts.length;
+
+    const topRankers = sortedAttempts.slice(0, 10).map((att, idx) => ({
+      rank: idx + 1,
+      studentName: att.studentName,
+      state: att.state,
+      district: att.district,
+      score: att.score,
+      totalMarks: att.totalMarks,
+      percentage: att.percentage,
+      timeTakenSeconds: att.timeTakenSeconds
+    }));
+
+    return res.json({
+      success: true,
+      attempt: {
+        ...attemptRecord,
+        rank
+      },
+      rank,
+      totalAttempts,
+      topRankers
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to submit test attempt." });
+  }
+});
+
+// 5. Get Results & Topper List for Admin
+app.get("/api/online-mocks/:shareId/results", (req, res) => {
+  try {
+    const { shareId } = req.params;
+    const mock = onlineMocksStore[shareId];
+
+    if (!mock) {
+      return res.status(404).json({ success: false, error: "Online Mock Test not found." });
+    }
+
+    const allAttempts = [...(mock.attempts || [])].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.timeTakenSeconds - b.timeTakenSeconds;
+    });
+
+    const rankedAttempts = allAttempts.map((att, idx) => ({
+      ...att,
+      rank: idx + 1
+    }));
+
+    const totalAttempts = rankedAttempts.length;
+    const avgScore = totalAttempts > 0
+      ? Math.round((rankedAttempts.reduce((a, c) => a + c.score, 0) / totalAttempts) * 10) / 10
+      : 0;
+    const highestScore = totalAttempts > 0 ? rankedAttempts[0].score : 0;
+
+    return res.json({
+      success: true,
+      summary: {
+        shareId: mock.shareId,
+        testName: mock.testName,
+        totalAttempts,
+        avgScore,
+        highestScore,
+        topRankers: rankedAttempts.slice(0, 10),
+        allAttempts: rankedAttempts
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to fetch results." });
+  }
+});
+
+// 6. Delete Published Online Mock
+app.delete("/api/online-mocks/:shareId", (req, res) => {
+  try {
+    const { shareId } = req.params;
+    if (onlineMocksStore[shareId]) {
+      delete onlineMocksStore[shareId];
+      saveOnlineMocksStore();
+      return res.json({ success: true, message: "Published mock test deleted." });
+    }
+    return res.status(404).json({ success: false, error: "Online mock test not found." });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to delete online mock." });
   }
 });
 
