@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { S3Client, ListObjectsV2Command, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
@@ -14,11 +13,11 @@ const PORT = 3000;
 app.use(express.json({ limit: "25mb" }));
 
 // Enable CORS for cross-origin or Vercel serverless requests
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  if (_req.method === "OPTIONS") {
+  if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
   next();
@@ -2254,6 +2253,9 @@ app.post("/api/r2/delete", async (req, res) => {
 // ==========================================
 
 function getWritableStorePath(): string {
+  if (process.env.VERCEL) {
+    return path.join("/tmp", "online_mocks_store.json");
+  }
   const cwdPath = path.join(process.cwd(), "online_mocks_store.json");
   try {
     const testFile = path.join(process.cwd(), ".write_test_tmp");
@@ -2625,6 +2627,7 @@ app.delete("/api/online-mocks/:shareId", (req, res) => {
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
