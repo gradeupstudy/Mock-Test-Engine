@@ -467,19 +467,23 @@ export async function exportPdfTestPaper(
   `;
 
   document.body.appendChild(container);
+  if (document.fonts && document.fonts.ready) {
+    await document.fonts.ready;
+  }
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   try {
     const scrollHeight = Math.max(container.scrollHeight, container.offsetHeight);
 
     const canvas = await html2canvas(container, {
-      scale: 2,
+      scale: 3,
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
       height: scrollHeight,
       windowHeight: scrollHeight,
-      scrollY: 0
+      scrollY: 0,
+      logging: false
     });
 
     const imgWidth = 210; // A4 width in mm
@@ -515,14 +519,14 @@ export async function exportPdfTestPaper(
         );
       }
 
-      const chunkImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+      const chunkImgData = pageCanvas.toDataURL('image/png');
       const chunkMmHeight = (currentChunkHeight * imgWidth) / canvas.width;
 
       if (position > 0) {
         pdf.addPage();
       }
 
-      pdf.addImage(chunkImgData, 'JPEG', 0, 0, imgWidth, chunkMmHeight);
+      pdf.addImage(chunkImgData, 'PNG', 0, 0, imgWidth, chunkMmHeight, undefined, 'FAST');
 
       heightLeft -= pageHeight;
       position += pxPageHeight;
@@ -600,6 +604,7 @@ export async function exportPdfAnswerKey(
   container.innerHTML = `
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap');
+      * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
     </style>
     <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">
       <h1 style="margin: 0; font-size: 20px; font-weight: 800; color: #1e3a8a; text-transform: uppercase;">
@@ -626,19 +631,23 @@ export async function exportPdfAnswerKey(
   `;
 
   document.body.appendChild(container);
+  if (document.fonts && document.fonts.ready) {
+    await document.fonts.ready;
+  }
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   try {
     const scrollHeight = Math.max(container.scrollHeight, container.offsetHeight);
 
     const canvas = await html2canvas(container, {
-      scale: 2,
+      scale: 3,
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
       height: scrollHeight,
       windowHeight: scrollHeight,
-      scrollY: 0
+      scrollY: 0,
+      logging: false
     });
 
     const imgWidth = 210;
@@ -674,20 +683,20 @@ export async function exportPdfAnswerKey(
         );
       }
 
-      const chunkImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+      const chunkImgData = pageCanvas.toDataURL('image/png');
       const chunkMmHeight = (currentChunkHeight * imgWidth) / canvas.width;
 
       if (position > 0) {
         pdf.addPage();
       }
 
-      pdf.addImage(chunkImgData, 'JPEG', 0, 0, imgWidth, chunkMmHeight);
+      pdf.addImage(chunkImgData, 'PNG', 0, 0, imgWidth, chunkMmHeight, undefined, 'FAST');
 
       heightLeft -= pageHeight;
       position += pxPageHeight;
     }
 
-    const fileName = `${(testNameOverride || 'Gradeup_Test').replace(/[^a-zA-Z0-9]/g, '_')}_Answer_Key.pdf`;
+    const fileName = `${(testNameOverride || 'Gradeup_Answer_Key').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
     pdf.save(fileName);
   } catch (err: any) {
     console.error('Answer Key PDF Generation Error:', err);
@@ -1272,7 +1281,8 @@ export function estimateQuestionRenderHeight(
 
 /**
  * Exports a formatted 2-Column Mock Test Question Paper to Microsoft Word (.doc / .docx)
- * Fully compatible with Microsoft Word, Google Docs, LibreOffice, and WPS Office.
+ * Fully respects manual custom pagination (customPages) and reproduces the exact
+ * 2-column layout, page-by-page, with header, instructions, boxed columns, and footers.
  */
 export function exportWordBookletPaper(
   questions: Question[],
@@ -1291,18 +1301,26 @@ export function exportWordBookletPaper(
 `1. All questions are compulsory and carry equal marks.
 2. There is No Negative Marking.
 3. Do not open the test booklet until instructed by the invigilator.`;
+  const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
-  const fontPt = config.fontSize === 'ultra-compact' ? '9pt' : config.fontSize === 'normal' ? '11pt' : '10pt';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '8.5pt' : config.fontSize === 'normal' ? '10pt' : '9pt';
+  const fontPt = config.fontSize === 'ultra-compact' ? '8.5pt' : config.fontSize === 'normal' ? '10.5pt' : '9.5pt';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '8pt' : config.fontSize === 'normal' ? '9.5pt' : '8.8pt';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '3pt' : config.fontSize === 'normal' ? '6pt' : '4pt';
 
-  // Format questions into 2 columns for Word
-  const half = Math.ceil(questions.length / 2);
-  const leftColQuestions = questions.slice(0, half);
-  const rightColQuestions = questions.slice(half);
+  const pages = config.customPages && config.customPages.length > 0
+    ? config.customPages
+    : paginateQuestionsFor2ColPaper(
+        questions,
+        config.fontSize || 'compact',
+        config.page1Capacity,
+        config.otherPageCapacity,
+        config.autoBalance !== false
+      );
 
-  const renderQuestionsList = (qs: Question[], startIndex: number) => {
-    return qs.map((q, idx) => {
-      const qNum = startIndex + idx + 1;
+  const renderWordQuestionsList = (items: PaperPageQuestion[]) => {
+    return items.map(item => {
+      const qNum = item.originalIndex + 1;
+      const q = item.question;
       const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
       const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
       const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
@@ -1310,28 +1328,28 @@ export function exportWordBookletPaper(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: 10pt; font-size: ${fontPt}; line-height: 1.35; page-break-inside: avoid;">
-          <div style="font-weight: bold; color: #000000; margin-bottom: 2pt;">
+        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; mso-line-height-rule: exactly; page-break-inside: avoid;">
+          <div style="font-weight: bold; color: #000000; margin-bottom: 1pt;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #334155; font-size: ${fontPt}; margin-bottom: 3pt;">
+            <div style="color: #1e293b; font-size: ${fontPt}; margin-bottom: 2pt;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <table style="width: 100%; border-collapse: collapse; font-size: ${optFontPt}; margin-top: 2pt;">
+            <table style="width: 100%; border-collapse: collapse; font-size: ${optFontPt}; margin-top: 1pt; border: none;">
               <tr>
-                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top;">${escapeHtml(optA)}</td>
-                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top;">${escapeHtml(optB)}</td>
+                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top; border: none;">${escapeHtml(optA)}</td>
+                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top; border: none;">${escapeHtml(optB)}</td>
               </tr>
               <tr>
-                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top;">${escapeHtml(optC)}</td>
-                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top;">${escapeHtml(optD)}</td>
+                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top; border: none;">${escapeHtml(optC)}</td>
+                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top; border: none;">${escapeHtml(optD)}</td>
               </tr>
             </table>
           ` : `
-            <div style="font-size: ${optFontPt}; margin-top: 2pt;">
+            <div style="font-size: ${optFontPt}; margin-top: 1pt;">
               <div style="padding: 1pt 0;">${escapeHtml(optA)}</div>
               <div style="padding: 1pt 0;">${escapeHtml(optB)}</div>
               <div style="padding: 1pt 0;">${escapeHtml(optC)}</div>
@@ -1342,6 +1360,69 @@ export function exportWordBookletPaper(
       `;
     }).join('');
   };
+
+  const totalPagesCount = includeAnswerKey ? pages.length + 1 : pages.length;
+
+  const pagesHtml = pages.map((page, idx) => {
+    let headerHtml = '';
+    if (page.isFirstPage) {
+      headerHtml = `
+        <div style="text-align: center; margin-bottom: 4pt;">
+          <h1 style="margin: 0; font-size: 14pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">${escapeHtml(testTitle)}</h1>
+          <div style="font-size: 8.5pt; font-weight: bold; margin-top: 2pt; padding-bottom: 3pt; border-bottom: 1.5pt solid #000000;">
+            <span>Time Allowed: ${duration} Mins</span> &nbsp;|&nbsp;
+            <span>Max Marks: ${marks}</span>
+            ${config.showRollNo !== false ? ` &nbsp;|&nbsp; <span>Roll No: ____________</span>` : ''}
+          </div>
+        </div>
+        ${instructions ? `
+          <div style="border: 1pt solid #64748b; padding: 3pt 6pt; margin-bottom: 4pt; font-size: 7.5pt; line-height: 1.25; background: #ffffff;">
+            <strong>General Instructions:</strong><br/>
+            ${escapeHtml(instructions).replace(/\n/g, '<br/>')}
+          </div>
+        ` : ''}
+      `;
+    } else {
+      headerHtml = `
+        <div style="margin-bottom: 4pt; padding-bottom: 2pt; border-bottom: 1.5pt solid #000000; font-size: 8.5pt; font-weight: bold;">
+          <table style="width: 100%; border-collapse: collapse; border: none;">
+            <tr>
+              <td style="text-align: left; border: none; font-weight: bold;">${escapeHtml(testTitle)}</td>
+              <td style="text-align: right; border: none; font-weight: bold; font-size: 7.5pt;">PAGE ${page.pageNumber} OF ${totalPagesCount}</td>
+            </tr>
+          </table>
+        </div>
+      `;
+    }
+
+    const isLastPaperPage = idx === pages.length - 1;
+    const needPageBreak = !isLastPaperPage || includeAnswerKey;
+
+    return `
+      <div class="word-page" style="margin-bottom: 6pt;">
+        ${headerHtml}
+        <table style="width: 100%; border-collapse: collapse; border: 1.5pt solid #000000; margin-bottom: 3pt;">
+          <tr>
+            <td style="width: 50%; vertical-align: top; padding: 4pt 6pt; border-right: 1.5pt solid #000000; border-top: none; border-bottom: none; border-left: none;">
+              ${renderWordQuestionsList(page.col1)}
+            </td>
+            <td style="width: 50%; vertical-align: top; padding: 4pt 6pt; border: none;">
+              ${renderWordQuestionsList(page.col2)}
+            </td>
+          </tr>
+        </table>
+        <div style="border-top: 1pt solid #000000; padding-top: 2pt; font-size: 7.5pt; font-weight: bold;">
+          <table style="width: 100%; border-collapse: collapse; border: none;">
+            <tr>
+              <td style="text-align: left; border: none;">${escapeHtml(footerText)}</td>
+              <td style="text-align: right; border: none;">Page ${page.pageNumber} of ${totalPagesCount}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      ${needPageBreak ? '<br clear="all" style="page-break-before: always; mso-break-type: page-break;" />' : ''}
+    `;
+  }).join('');
 
   let answerKeyHtml = '';
   if (includeAnswerKey) {
@@ -1354,16 +1435,16 @@ export function exportWordBookletPaper(
       const rows = slice.map((q, idx) => {
         const qNum = c * itemsPerCol + idx + 1;
         return `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 2pt 4pt; font-weight: bold; width: 40px; text-align: right;">${qNum}.</td>
-            <td style="padding: 2pt 4pt; font-weight: bold; color: #15803d;">Option ${q.answer || 'A'}</td>
+          <tr style="border-bottom: 0.5pt solid #e2e8f0;">
+            <td style="padding: 1.5pt 3pt; font-weight: bold; width: 30pt; text-align: right; border: none;">${qNum}.</td>
+            <td style="padding: 1.5pt 3pt; font-weight: bold; color: #15803d; border: none;">Option ${q.answer || 'A'}</td>
           </tr>
         `;
       }).join('');
 
       keyCols.push(`
-        <td style="vertical-align: top; padding: 0 10pt;">
-          <table style="width: 100%; border-collapse: collapse; font-size: 9pt;">
+        <td style="vertical-align: top; padding: 0 8pt; width: ${100 / cols}%; border: none;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 8.5pt; border: none;">
             ${rows}
           </table>
         </td>
@@ -1371,16 +1452,24 @@ export function exportWordBookletPaper(
     }
 
     answerKeyHtml = `
-      <div style="page-break-before: always; margin-top: 20pt;">
-        <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 6pt; margin-bottom: 12pt;">
-          <h2 style="margin: 0; font-size: 14pt; text-transform: uppercase;">${escapeHtml(testTitle)} - OFFICIAL ANSWER KEY</h2>
-          <p style="margin: 4pt 0 0 0; font-size: 9pt; color: #475569;">Total Questions: ${questions.length} MCQs | Max Marks: ${marks}</p>
+      <div class="word-page" style="margin-top: 6pt;">
+        <div style="text-align: center; border-bottom: 1.5pt solid #000000; padding-bottom: 4pt; margin-bottom: 8pt;">
+          <h2 style="margin: 0; font-size: 13pt; font-weight: 800; text-transform: uppercase;">${escapeHtml(testTitle)} - OFFICIAL ANSWER KEY</h2>
+          <p style="margin: 2pt 0 0 0; font-size: 8pt; color: #475569;">Total Questions: ${questions.length} MCQs | Max Marks: ${marks}</p>
         </div>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10pt;">
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6pt; border: 1pt solid #cbd5e1; padding: 6pt;">
           <tr>
             ${keyCols.join('')}
           </tr>
         </table>
+        <div style="border-top: 1pt solid #000000; padding-top: 2pt; margin-top: 10pt; font-size: 7.5pt; font-weight: bold;">
+          <table style="width: 100%; border-collapse: collapse; border: none;">
+            <tr>
+              <td style="text-align: left; border: none;">${escapeHtml(footerText)}</td>
+              <td style="text-align: right; border: none;">Page ${totalPagesCount} of ${totalPagesCount} (Answer Key)</td>
+            </tr>
+          </table>
+        </div>
       </div>
     `;
   }
@@ -1392,76 +1481,31 @@ export function exportWordBookletPaper(
       <title>${escapeHtml(testTitle)}</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
-        @page {
-          size: A4 portrait;
-          margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+        @page Section1 {
+          size: 210mm 297mm;
+          margin: 12mm 14mm 12mm 14mm;
+          mso-header-margin: 8mm;
+          mso-footer-margin: 8mm;
+          mso-paper-source: 0;
+        }
+        div.Section1 {
+          page: Section1;
         }
         body {
           font-family: 'Noto Sans Devanagari', 'Calibri', 'Segoe UI', Arial, sans-serif;
           font-size: ${fontPt};
           color: #000000;
-          line-height: 1.35;
+          line-height: 1.32;
           margin: 0;
           padding: 0;
-        }
-        .header-box {
-          text-align: center;
-          border-bottom: 2px solid #000000;
-          padding-bottom: 6pt;
-          margin-bottom: 10pt;
-        }
-        .instructions-box {
-          border: 1px solid #94a3b8;
-          background-color: #f8fafc;
-          padding: 6pt 10pt;
-          margin-bottom: 12pt;
-          font-size: 8.5pt;
-          line-height: 1.3;
-        }
-        .two-col-table {
-          width: 100%;
-          border-collapse: collapse;
-          border: 1.5px solid #000000;
-        }
-        .two-col-table td {
-          vertical-align: top;
-          padding: 8pt;
-          width: 50%;
-        }
-        .left-col-td {
-          border-right: 1.5px solid #000000;
         }
       </style>
     </head>
     <body>
-      <div class="header-box">
-        <h1 style="margin: 0; font-size: 16pt; font-weight: 800; text-transform: uppercase;">${escapeHtml(testTitle)}</h1>
-        <div style="font-size: 9.5pt; font-weight: bold; margin-top: 4pt;">
-          <span>Time Allowed: ${duration} Mins</span> &nbsp;|&nbsp;
-          <span>Max Marks: ${marks}</span>
-          ${config.showRollNo !== false ? ` &nbsp;|&nbsp; <span>Roll No: ____________</span>` : ''}
-        </div>
+      <div class="Section1">
+        ${pagesHtml}
+        ${answerKeyHtml}
       </div>
-
-      ${instructions ? `
-        <div class="instructions-box">
-          <strong style="display: block; margin-bottom: 2pt;">General Instructions:</strong>
-          ${escapeHtml(instructions).replace(/\n/g, '<br/>')}
-        </div>
-      ` : ''}
-
-      <table class="two-col-table">
-        <tr>
-          <td class="left-col-td">
-            ${renderQuestionsList(leftColQuestions, 0)}
-          </td>
-          <td>
-            ${renderQuestionsList(rightColQuestions, half)}
-          </td>
-        </tr>
-      </table>
-
-      ${answerKeyHtml}
     </body>
     </html>
   `;
@@ -1649,14 +1693,14 @@ export async function exportCompact2ColPdfTestPaper(
   const opacity = config.watermarkOpacity !== undefined ? config.watermarkOpacity : 0.08;
   const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
-  // Question styling based on density
-  const fontPt = config.fontSize === 'ultra-compact' ? '11px' : config.fontSize === 'normal' ? '13px' : '12px';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '8px' : config.fontSize === 'normal' ? '14px' : '10px';
+  // Question styling based on density - precisely aligned with live preview
+  const fontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11.5px' : '10.5px';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '8px' : '5px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
-    logoHtml = `<div style="text-align: center; margin-bottom: 4px;"><img src="${config.logoDataUrl}" style="height: 48px; width: auto; object-fit: contain;" /></div>`;
+    logoHtml = `<div style="text-align: center; margin-bottom: 3px;"><img src="${config.logoDataUrl}" style="height: 42px; width: auto; object-fit: contain;" /></div>`;
   }
 
   const watermarkHtml = watermark ? `
@@ -1682,24 +1726,24 @@ export async function exportCompact2ColPdfTestPaper(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; position: relative; z-index: 1;">
+        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; position: relative; z-index: 1;">
           <div style="font-weight: 700; color: #000000; margin-bottom: 2px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 3px; font-size: ${fontPt};">
+            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${fontPt}; line-height: 1.3;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
               <div>${optD}</div>
             </div>
           ` : `
-            <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000;">
+            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
@@ -1726,6 +1770,10 @@ export async function exportCompact2ColPdfTestPaper(
   const pageHeight = 297;
 
   try {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
     for (let pIdx = 0; pIdx < pages.length; pIdx++) {
       const page = pages[pIdx];
       const pageDiv = document.createElement('div');
@@ -1739,7 +1787,7 @@ export async function exportCompact2ColPdfTestPaper(
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
       pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '22px 28px 18px 28px';
+      pageDiv.style.padding = '20px 24px 16px 24px';
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
@@ -1750,7 +1798,7 @@ export async function exportCompact2ColPdfTestPaper(
         headerHtml = `
           <div>
             <!-- Top Exam Header -->
-            <div style="text-align: center; margin-bottom: 6px;">
+            <div style="text-align: center; margin-bottom: 5px;">
               ${logoHtml}
               <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
                 ${escapeHtml(testTitle)}
@@ -1765,7 +1813,7 @@ export async function exportCompact2ColPdfTestPaper(
 
             <!-- General Instructions Box -->
             ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 6px; font-size: 9px; line-height: 1.3; color: #000000; background: #ffffff;">
+              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
                 <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
                 ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
               </div>
@@ -1774,7 +1822,7 @@ export async function exportCompact2ColPdfTestPaper(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
+          <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(testTitle)}</span>
             <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
           </div>
@@ -1784,6 +1832,7 @@ export async function exportCompact2ColPdfTestPaper(
       pageDiv.innerHTML = `
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+          * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
         </style>
         ${watermarkHtml}
         <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
@@ -1795,17 +1844,17 @@ export async function exportCompact2ColPdfTestPaper(
           <!-- 2-Column Boxed Layout with Outer Border on all 4 sides and Center Line -->
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
             <!-- Left Column -->
-            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
             <!-- Right Column -->
-            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
 
           <!-- Page Bottom Footer with Page Number -->
-          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9px; font-weight: 700; color: #000000;">
+          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(footerText)}</span>
             <span>Page ${page.pageNumber} of ${page.totalPages}</span>
           </div>
@@ -1813,17 +1862,18 @@ export async function exportCompact2ColPdfTestPaper(
       `;
 
       document.body.appendChild(pageDiv);
-      await new Promise(resolve => setTimeout(resolve, 80));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const canvas = await html2canvas(pageDiv, {
-        scale: 2,
+        scale: 3, // High-resolution (300 DPI) for crystal sharp text
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
         height: 1123,
         windowWidth: 794,
-        windowHeight: 1123
+        windowHeight: 1123,
+        logging: false
       });
 
       if (document.body.contains(pageDiv)) {
@@ -1834,7 +1884,8 @@ export async function exportCompact2ColPdfTestPaper(
         pdf.addPage();
       }
 
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
+      // Use PNG with high-DPI canvas to completely eliminate lossy JPEG blur and compression artifacts
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, pageHeight, undefined, 'FAST');
     }
 
     const fileName = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Paper_Saver.pdf`;
@@ -1887,7 +1938,7 @@ export async function exportCompact1PagePdfAnswerKey(
     </div>
   ` : '';
 
-  // Determine number of columns for answer grid based on total questions (e.g. 2 columns for 50 Qs like sample PDF, or 4 columns for 100 Qs)
+  // Determine number of columns for answer grid based on total questions
   const cols = questions.length > 60 ? 4 : questions.length > 30 ? 2 : 1;
   const itemsPerCol = Math.ceil(questions.length / cols);
 
@@ -1940,7 +1991,7 @@ export async function exportCompact1PagePdfAnswerKey(
         <span style="font-size: 14px; font-weight: 800; color: #000000; letter-spacing: 0.5px;">Answer Key</span>
       </div>
 
-      <!-- Multi-Column Compact Answer Grid (Exactly like sample PDF) -->
+      <!-- Multi-Column Compact Answer Grid -->
       <div style="display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: 20px 40px; padding: 0 40px;">
         ${columnsHtml}
       </div>
@@ -1948,14 +1999,18 @@ export async function exportCompact1PagePdfAnswerKey(
   `;
 
   document.body.appendChild(container);
-  await new Promise(resolve => setTimeout(resolve, 120));
+  if (document.fonts && document.fonts.ready) {
+    await document.fonts.ready;
+  }
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
     const canvas = await html2canvas(container, {
-      scale: 2,
+      scale: 3,
       useCORS: true,
       allowTaint: true,
-      backgroundColor: '#ffffff'
+      backgroundColor: '#ffffff',
+      logging: false
     });
 
     const imgWidth = 210;
@@ -1963,7 +2018,7 @@ export async function exportCompact1PagePdfAnswerKey(
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
     const pdf = new jsPDF('p', 'mm', 'a4');
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, imgHeight);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, imgHeight, undefined, 'FAST');
 
     const fileName = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Answer_Key_1Page.pdf`;
     pdf.save(fileName);
@@ -1996,13 +2051,13 @@ export async function exportCombinedBookletPdf(
   const opacity = config.watermarkOpacity !== undefined ? config.watermarkOpacity : 0.08;
   const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
-  const fontPt = config.fontSize === 'ultra-compact' ? '11px' : config.fontSize === 'normal' ? '13px' : '12px';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '8px' : config.fontSize === 'normal' ? '14px' : '10px';
+  const fontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11.5px' : '10.5px';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '8px' : '5px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
-    logoHtml = `<div style="text-align: center; margin-bottom: 4px;"><img src="${config.logoDataUrl}" style="height: 48px; width: auto; object-fit: contain;" /></div>`;
+    logoHtml = `<div style="text-align: center; margin-bottom: 3px;"><img src="${config.logoDataUrl}" style="height: 42px; width: auto; object-fit: contain;" /></div>`;
   }
 
   const watermarkHtml = watermark ? `
@@ -2028,24 +2083,24 @@ export async function exportCombinedBookletPdf(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; position: relative; z-index: 1;">
+        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; position: relative; z-index: 1;">
           <div style="font-weight: 700; color: #000000; margin-bottom: 2px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 3px; font-size: ${fontPt};">
+            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${fontPt}; line-height: 1.3;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
               <div>${optD}</div>
             </div>
           ` : `
-            <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000;">
+            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
@@ -2072,6 +2127,10 @@ export async function exportCombinedBookletPdf(
   const pageHeight = 297;
 
   try {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
     // 1. Render each Question Paper page
     for (let pIdx = 0; pIdx < pages.length; pIdx++) {
       const page = pages[pIdx];
@@ -2086,7 +2145,7 @@ export async function exportCombinedBookletPdf(
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
       pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '22px 28px 18px 28px';
+      pageDiv.style.padding = '20px 24px 16px 24px';
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
@@ -2096,7 +2155,7 @@ export async function exportCombinedBookletPdf(
       if (page.isFirstPage) {
         headerHtml = `
           <div>
-            <div style="text-align: center; margin-bottom: 6px;">
+            <div style="text-align: center; margin-bottom: 5px;">
               ${logoHtml}
               <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
                 ${escapeHtml(testTitle)}
@@ -2110,7 +2169,7 @@ export async function exportCombinedBookletPdf(
             </div>
 
             ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 6px; font-size: 9px; line-height: 1.3; color: #000000; background: #ffffff;">
+              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
                 <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
                 ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
               </div>
@@ -2119,7 +2178,7 @@ export async function exportCombinedBookletPdf(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
+          <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(testTitle)}</span>
             <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
           </div>
@@ -2129,6 +2188,7 @@ export async function exportCombinedBookletPdf(
       pageDiv.innerHTML = `
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+          * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
         </style>
         ${watermarkHtml}
         <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
@@ -2137,15 +2197,15 @@ export async function exportCombinedBookletPdf(
           </div>
 
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
-            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
-            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
 
-          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9px; font-weight: 700; color: #000000;">
+          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(footerText)}</span>
             <span>Page ${page.pageNumber} of ${page.totalPages + 1}</span>
           </div>
@@ -2153,17 +2213,18 @@ export async function exportCombinedBookletPdf(
       `;
 
       document.body.appendChild(pageDiv);
-      await new Promise(resolve => setTimeout(resolve, 80));
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const canvas = await html2canvas(pageDiv, {
-        scale: 2,
+        scale: 3, // High-res 300 DPI for crystal clear text
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
         height: 1123,
         windowWidth: 794,
-        windowHeight: 1123
+        windowHeight: 1123,
+        logging: false
       });
 
       if (document.body.contains(pageDiv)) {
@@ -2174,7 +2235,7 @@ export async function exportCombinedBookletPdf(
         pdf.addPage();
       }
 
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, pageHeight, undefined, 'FAST');
     }
 
     // 2. Render Answer Key Page
@@ -2218,6 +2279,7 @@ export async function exportCombinedBookletPdf(
     ansKeyContainer.innerHTML = `
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+        * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
       </style>
       ${watermarkHtml}
       <div style="position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; justify-content: space-between;">
@@ -2252,15 +2314,16 @@ export async function exportCombinedBookletPdf(
     `;
 
     document.body.appendChild(ansKeyContainer);
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     const canvasAns = await html2canvas(ansKeyContainer, {
-      scale: 2,
+      scale: 3, // High-res 300 DPI
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
       width: 794,
-      height: 1123
+      height: 1123,
+      logging: false
     });
 
     if (document.body.contains(ansKeyContainer)) {
@@ -2268,7 +2331,7 @@ export async function exportCombinedBookletPdf(
     }
 
     pdf.addPage();
-    pdf.addImage(canvasAns.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
+    pdf.addImage(canvasAns.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, pageHeight, undefined, 'FAST');
 
     const fileName = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Complete_Booklet_with_Key.pdf`;
     pdf.save(fileName);
@@ -2300,8 +2363,8 @@ export function printNativeCompact2ColPaper(
   const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
   const fontPt = config.fontSize === 'ultra-compact' ? '7.5pt' : config.fontSize === 'normal' ? '9.5pt' : '8.5pt';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '7pt' : config.fontSize === 'normal' ? '8.5pt' : '7.8pt';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '7px' : '4px';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '7pt' : config.fontSize === 'normal' ? '8.8pt' : '8pt';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '6px' : '4px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
@@ -2330,19 +2393,19 @@ export function printNativeCompact2ColPaper(
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; margin-bottom: 2px; font-size: ${fontPt};">
+            <div style="color: #1e293b; margin-bottom: 2px; font-size: ${fontPt}; line-height: 1.25;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; font-size: ${optFontPt};">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; font-size: ${optFontPt}; line-height: 1.2;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
               <div>${optD}</div>
             </div>
           ` : `
-            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt};">
+            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt}; line-height: 1.2;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
@@ -2428,7 +2491,7 @@ export function printNativeCompact2ColPaper(
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
         @page {
           size: A4 portrait;
-          margin: 0;
+          margin: 6mm 8mm 6mm 8mm;
         }
         * {
           box-sizing: border-box;
@@ -2459,11 +2522,12 @@ export function printNativeCompact2ColPaper(
         }
         .print-page {
           background: #ffffff;
-          width: 210mm;
-          height: 297mm;
-          max-height: 297mm;
+          width: 100%;
+          max-width: 194mm;
+          height: 284mm;
+          max-height: 284mm;
           margin: 15px auto;
-          padding: 6mm 9mm 5mm 9mm;
+          padding: 4mm 6mm 3mm 6mm;
           position: relative;
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           page-break-after: always;
@@ -2527,16 +2591,14 @@ export function printNativeCompact2ColPaper(
             background: transparent !important;
             margin: 0 !important;
             padding: 0 !important;
-            width: 210mm !important;
-            height: 297mm !important;
           }
           .print-page {
             box-shadow: none !important;
-            margin: 0 !important;
-            padding: 6mm 9mm 5mm 9mm !important;
-            width: 210mm !important;
-            height: 297mm !important;
-            max-height: 297mm !important;
+            margin: 0 auto !important;
+            padding: 2mm 4mm 2mm 4mm !important;
+            width: 100% !important;
+            height: 284mm !important;
+            max-height: 284mm !important;
             page-break-after: always !important;
             break-after: page !important;
             page-break-inside: avoid !important;
