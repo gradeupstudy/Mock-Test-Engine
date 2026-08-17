@@ -1265,6 +1265,220 @@ export function estimateQuestionRenderHeight(
   return Math.ceil(height);
 }
 
+// -------------------------------------------------------------
+// 0. EXPORT TO MICROSOFT WORD (.DOC / .DOCX COMPATIBLE)
+// -------------------------------------------------------------
+
+/**
+ * Exports a formatted 2-Column Mock Test Question Paper to Microsoft Word (.doc / .docx)
+ * Fully compatible with Microsoft Word, Google Docs, LibreOffice, and WPS Office.
+ */
+export function exportWordBookletPaper(
+  questions: Question[],
+  config: BookletCustomConfig,
+  includeAnswerKey: boolean = false
+) {
+  if (questions.length === 0) {
+    alert('No questions loaded to export.');
+    return;
+  }
+
+  const testTitle = config.testName || 'HP Police Constable Mock Test';
+  const duration = config.duration || 60;
+  const marks = config.totalMarks || (questions.length * (questions.length === 50 ? 1 : 2));
+  const instructions = config.instructions ||
+`1. All questions are compulsory and carry equal marks.
+2. There is No Negative Marking.
+3. Do not open the test booklet until instructed by the invigilator.`;
+
+  const fontPt = config.fontSize === 'ultra-compact' ? '9pt' : config.fontSize === 'normal' ? '11pt' : '10pt';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '8.5pt' : config.fontSize === 'normal' ? '10pt' : '9pt';
+
+  // Format questions into 2 columns for Word
+  const half = Math.ceil(questions.length / 2);
+  const leftColQuestions = questions.slice(0, half);
+  const rightColQuestions = questions.slice(half);
+
+  const renderQuestionsList = (qs: Question[], startIndex: number) => {
+    return qs.map((q, idx) => {
+      const qNum = startIndex + idx + 1;
+      const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
+      const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
+      const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
+      const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
+      const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+
+      return `
+        <div style="margin-bottom: 10pt; font-size: ${fontPt}; line-height: 1.35; page-break-inside: avoid;">
+          <div style="font-weight: bold; color: #000000; margin-bottom: 2pt;">
+            <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+          </div>
+          ${shouldDisplayTranslation(q.question, q.translation) ? `
+            <div style="color: #334155; font-size: ${fontPt}; margin-bottom: 3pt;">
+              ${escapeHtml(formatMathSymbols(q.translation!))}
+            </div>
+          ` : ''}
+          ${isShort ? `
+            <table style="width: 100%; border-collapse: collapse; font-size: ${optFontPt}; margin-top: 2pt;">
+              <tr>
+                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top;">${escapeHtml(optA)}</td>
+                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top;">${escapeHtml(optB)}</td>
+              </tr>
+              <tr>
+                <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top;">${escapeHtml(optC)}</td>
+                <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top;">${escapeHtml(optD)}</td>
+              </tr>
+            </table>
+          ` : `
+            <div style="font-size: ${optFontPt}; margin-top: 2pt;">
+              <div style="padding: 1pt 0;">${escapeHtml(optA)}</div>
+              <div style="padding: 1pt 0;">${escapeHtml(optB)}</div>
+              <div style="padding: 1pt 0;">${escapeHtml(optC)}</div>
+              <div style="padding: 1pt 0;">${escapeHtml(optD)}</div>
+            </div>
+          `}
+        </div>
+      `;
+    }).join('');
+  };
+
+  let answerKeyHtml = '';
+  if (includeAnswerKey) {
+    const cols = questions.length > 60 ? 4 : questions.length > 30 ? 2 : 1;
+    const itemsPerCol = Math.ceil(questions.length / cols);
+    const keyCols: string[] = [];
+
+    for (let c = 0; c < cols; c++) {
+      const slice = questions.slice(c * itemsPerCol, (c + 1) * itemsPerCol);
+      const rows = slice.map((q, idx) => {
+        const qNum = c * itemsPerCol + idx + 1;
+        return `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 2pt 4pt; font-weight: bold; width: 40px; text-align: right;">${qNum}.</td>
+            <td style="padding: 2pt 4pt; font-weight: bold; color: #15803d;">Option ${q.answer || 'A'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      keyCols.push(`
+        <td style="vertical-align: top; padding: 0 10pt;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 9pt;">
+            ${rows}
+          </table>
+        </td>
+      `);
+    }
+
+    answerKeyHtml = `
+      <div style="page-break-before: always; margin-top: 20pt;">
+        <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 6pt; margin-bottom: 12pt;">
+          <h2 style="margin: 0; font-size: 14pt; text-transform: uppercase;">${escapeHtml(testTitle)} - OFFICIAL ANSWER KEY</h2>
+          <p style="margin: 4pt 0 0 0; font-size: 9pt; color: #475569;">Total Questions: ${questions.length} MCQs | Max Marks: ${marks}</p>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10pt;">
+          <tr>
+            ${keyCols.join('')}
+          </tr>
+        </table>
+      </div>
+    `;
+  }
+
+  const htmlDoc = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>${escapeHtml(testTitle)}</title>
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+        @page {
+          size: A4 portrait;
+          margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+        }
+        body {
+          font-family: 'Noto Sans Devanagari', 'Calibri', 'Segoe UI', Arial, sans-serif;
+          font-size: ${fontPt};
+          color: #000000;
+          line-height: 1.35;
+          margin: 0;
+          padding: 0;
+        }
+        .header-box {
+          text-align: center;
+          border-bottom: 2px solid #000000;
+          padding-bottom: 6pt;
+          margin-bottom: 10pt;
+        }
+        .instructions-box {
+          border: 1px solid #94a3b8;
+          background-color: #f8fafc;
+          padding: 6pt 10pt;
+          margin-bottom: 12pt;
+          font-size: 8.5pt;
+          line-height: 1.3;
+        }
+        .two-col-table {
+          width: 100%;
+          border-collapse: collapse;
+          border: 1.5px solid #000000;
+        }
+        .two-col-table td {
+          vertical-align: top;
+          padding: 8pt;
+          width: 50%;
+        }
+        .left-col-td {
+          border-right: 1.5px solid #000000;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header-box">
+        <h1 style="margin: 0; font-size: 16pt; font-weight: 800; text-transform: uppercase;">${escapeHtml(testTitle)}</h1>
+        <div style="font-size: 9.5pt; font-weight: bold; margin-top: 4pt;">
+          <span>Time Allowed: ${duration} Mins</span> &nbsp;|&nbsp;
+          <span>Max Marks: ${marks}</span>
+          ${config.showRollNo !== false ? ` &nbsp;|&nbsp; <span>Roll No: ____________</span>` : ''}
+        </div>
+      </div>
+
+      ${instructions ? `
+        <div class="instructions-box">
+          <strong style="display: block; margin-bottom: 2pt;">General Instructions:</strong>
+          ${escapeHtml(instructions).replace(/\n/g, '<br/>')}
+        </div>
+      ` : ''}
+
+      <table class="two-col-table">
+        <tr>
+          <td class="left-col-td">
+            ${renderQuestionsList(leftColQuestions, 0)}
+          </td>
+          <td>
+            ${renderQuestionsList(rightColQuestions, half)}
+          </td>
+        </tr>
+      </table>
+
+      ${answerKeyHtml}
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff', htmlDoc], {
+    type: 'application/msword;charset=utf-8'
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}${includeAnswerKey ? '_with_Key' : ''}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Calculates optimal capacity recommendations for A4 paper based on actual question content height.
  */
@@ -1272,8 +1486,8 @@ export function getRecommendedPageCapacities(
   totalQuestions: number,
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
 ): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
-  let maxP1 = density === 'ultra-compact' ? 28 : density === 'normal' ? 18 : 24;
-  let maxOther = density === 'ultra-compact' ? 34 : density === 'normal' ? 22 : 28;
+  let maxP1 = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 22;
+  let maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
 
   if (totalQuestions <= 0) {
     return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
@@ -1296,16 +1510,18 @@ export function getRecommendedPageCapacities(
     return { p1Capacity: p1, otherCapacity: other, estimatedPages: 2 };
   }
 
-  const p1 = maxP1;
+  const p1Ratio = maxP1 / (maxP1 + (totalPages - 1) * maxOther);
+  let p1 = Math.min(maxP1, Math.max(14, Math.round(totalQuestions * p1Ratio)));
+  if (p1 % 2 !== 0 && p1 + 1 <= maxP1) p1 += 1;
   const otherPagesRemaining = totalQuestions - p1;
-  const perOtherPage = Math.ceil(otherPagesRemaining / numOtherPages);
+  const perOtherPage = Math.ceil(otherPagesRemaining / (totalPages - 1));
   return { p1Capacity: p1, otherCapacity: perOtherPage, estimatedPages: totalPages };
 }
 
 /**
  * Precision Question-to-Page Layout Engine:
- * Uses exact pixel height estimation for each question to distribute questions across
- * discrete A4 pages, filling both columns evenly and eliminating empty space at the bottom.
+ * Dynamically computes an even distribution of questions across discrete A4 pages.
+ * Fills both columns evenly without overflowing or clipping questions at the bottom.
  */
 export function paginateQuestionsFor2ColPaper(
   questions: Question[],
@@ -1316,159 +1532,95 @@ export function paginateQuestionsFor2ColPaper(
 ): PaperPageLayout[] {
   if (!questions || questions.length === 0) return [];
 
-  // Usable vertical height per column in A4 format (at 96 DPI):
-  // Page 1 has top logo, test title, time/marks, and instructions box
-  const p1ColMaxHeight = density === 'ultra-compact' ? 880 : density === 'normal' ? 800 : 840;
-  // Other pages have only a compact header line
-  const otherColMaxHeight = density === 'ultra-compact' ? 1020 : density === 'normal' ? 940 : 980;
-
-  // Compute item heights
   const itemsWithHeight: PaperPageQuestion[] = questions.map((q, idx) => ({
     question: q,
     originalIndex: idx,
     estimatedHeight: estimateQuestionRenderHeight(q, density)
   }));
 
-  // If manual numeric question counts are explicitly provided
+  const totalN = questions.length;
+  const maxP1 = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 22;
+  const maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
+
+  // Determine page counts array
+  let pageQuestionCounts: number[] = [];
+
   if (page1CapOverride && page1CapOverride > 0 && otherCapOverride && otherCapOverride > 0) {
-    const pages: PaperPageLayout[] = [];
-    let currentIndex = 0;
-    let pageNum = 1;
-
-    while (currentIndex < questions.length) {
-      const isFirst = pageNum === 1;
-      const currentTotalCap = isFirst ? page1CapOverride : otherCapOverride;
-      const remaining = questions.length - currentIndex;
-      const countForThisPage = Math.min(currentTotalCap, remaining);
-
-      const col1Count = Math.ceil(countForThisPage / 2);
-      const pageSlice = itemsWithHeight.slice(currentIndex, currentIndex + countForThisPage);
-      const col1 = pageSlice.slice(0, col1Count);
-      const col2 = pageSlice.slice(col1Count);
-
-      pages.push({
-        pageNumber: pageNum,
-        totalPages: 1,
-        isFirstPage: isFirst,
-        col1,
-        col2,
-        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
-        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
-      });
-
-      currentIndex += countForThisPage;
-      pageNum++;
+    let rem = totalN;
+    let pNum = 1;
+    while (rem > 0) {
+      const cap = pNum === 1 ? page1CapOverride : otherCapOverride;
+      const count = Math.min(cap, rem);
+      pageQuestionCounts.push(count);
+      rem -= count;
+      pNum++;
     }
+  } else {
+    // Dynamic Auto-Balance Mode
+    if (totalN <= maxP1) {
+      pageQuestionCounts = [totalN];
+    } else {
+      const totalPages = 1 + Math.ceil((totalN - maxP1) / maxOther);
+      if (totalPages === 2) {
+        let p1Count = Math.min(maxP1, Math.floor(totalN * 0.46));
+        if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
+        const p2Count = totalN - p1Count;
+        pageQuestionCounts = [p1Count, p2Count];
+      } else {
+        const p1Ratio = maxP1 / (maxP1 + (totalPages - 1) * maxOther);
+        let p1Count = Math.min(maxP1, Math.max(14, Math.round(totalN * p1Ratio)));
+        if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
 
-    const totalPages = Math.max(1, pages.length);
-    pages.forEach(p => { p.totalPages = totalPages; });
-    return pages;
-  }
+        const remainingQs = totalN - p1Count;
+        const numOther = totalPages - 1;
+        const perOther = Math.floor(remainingQs / numOther);
+        let extra = remainingQs % numOther;
 
-  // --- HEIGHT-BASED DYNAMIC AUTO-BALANCED PAGINATION ---
-  const totalHeight = itemsWithHeight.reduce((sum, item) => sum + item.estimatedHeight, 0);
-  const p1TotalCapHeight = p1ColMaxHeight * 2;
-  const otherTotalCapHeight = otherColMaxHeight * 2;
-
-  // Calculate minimum total pages needed
-  let numPages = 1;
-  if (totalHeight > p1TotalCapHeight) {
-    numPages = 1 + Math.ceil((totalHeight - p1TotalCapHeight) / otherTotalCapHeight);
-  }
-
-  // If autoBalance is active, adjust target capacity per page proportionally
-  let targetP1ColHeight = p1ColMaxHeight;
-  let targetOtherColHeight = otherColMaxHeight;
-
-  if (autoBalance && numPages > 1) {
-    const totalMaxPossibleHeight = p1TotalCapHeight + (numPages - 1) * otherTotalCapHeight;
-    const fillRatio = Math.min(1.0, Math.max(0.70, totalHeight / totalMaxPossibleHeight));
-    
-    // Scale target column heights smoothly
-    targetP1ColHeight = Math.max(400, Math.round(p1ColMaxHeight * fillRatio));
-    targetOtherColHeight = Math.max(400, Math.round(otherColMaxHeight * fillRatio));
+        pageQuestionCounts = [p1Count];
+        for (let i = 0; i < numOther; i++) {
+          let count = perOther + (extra > 0 ? 1 : 0);
+          if (extra > 0) extra--;
+          pageQuestionCounts.push(count);
+        }
+      }
+    }
   }
 
   const pages: PaperPageLayout[] = [];
-  let currentIdx = 0;
-  let pageNum = 1;
+  let currentIndex = 0;
 
-  while (currentIdx < itemsWithHeight.length) {
+  for (let pIdx = 0; pIdx < pageQuestionCounts.length; pIdx++) {
+    const pageNum = pIdx + 1;
     const isFirst = pageNum === 1;
-    const isLastTargetPage = pageNum === numPages;
-    const currentColHeightLimit = isFirst ? targetP1ColHeight : targetOtherColHeight;
-    const absoluteColHeightLimit = isFirst ? p1ColMaxHeight : otherColMaxHeight;
+    const countForPage = pageQuestionCounts[pIdx];
 
-    const col1: PaperPageQuestion[] = [];
-    const col2: PaperPageQuestion[] = [];
-    let col1Height = 0;
-    let col2Height = 0;
-
-    if (isLastTargetPage) {
-      // For the last page, distribute all remaining questions evenly between Col 1 and Col 2
-      const remainingItems = itemsWithHeight.slice(currentIdx);
-      const remainingTotalHeight = remainingItems.reduce((sum, item) => sum + item.estimatedHeight, 0);
-      const targetHalfHeight = remainingTotalHeight / 2;
-
-      let tempCol1Height = 0;
-      let splitIdx = 0;
-      for (let i = 0; i < remainingItems.length; i++) {
-        tempCol1Height += remainingItems[i].estimatedHeight;
-        if (tempCol1Height >= targetHalfHeight || i >= Math.ceil(remainingItems.length / 2)) {
-          splitIdx = i + 1;
-          break;
-        }
-      }
-      if (splitIdx === 0) splitIdx = Math.ceil(remainingItems.length / 2);
-
-      col1.push(...remainingItems.slice(0, splitIdx));
-      col2.push(...remainingItems.slice(splitIdx));
-      col1Height = col1.reduce((sum, item) => sum + item.estimatedHeight, 0);
-      col2Height = col2.reduce((sum, item) => sum + item.estimatedHeight, 0);
-      currentIdx = itemsWithHeight.length;
-    } else {
-      // 1. Fill Left Column
-      while (currentIdx < itemsWithHeight.length) {
-        const item = itemsWithHeight[currentIdx];
-        if (col1.length > 0 && (col1Height + item.estimatedHeight > currentColHeightLimit || col1Height + item.estimatedHeight > absoluteColHeightLimit)) {
-          break;
-        }
-        col1.push(item);
-        col1Height += item.estimatedHeight;
-        currentIdx++;
-      }
-
-      // 2. Fill Right Column
-      while (currentIdx < itemsWithHeight.length) {
-        const item = itemsWithHeight[currentIdx];
-        if (col2.length > 0 && (col2Height + item.estimatedHeight > currentColHeightLimit || col2Height + item.estimatedHeight > absoluteColHeightLimit)) {
-          break;
-        }
-        col2.push(item);
-        col2Height += item.estimatedHeight;
-        currentIdx++;
-      }
-    }
-
-    // Safety fallback: Ensure page has at least 1 question
-    if (col1.length === 0 && col2.length === 0 && currentIdx < itemsWithHeight.length) {
-      const item = itemsWithHeight[currentIdx];
-      col1.push(item);
-      col1Height += item.estimatedHeight;
-      currentIdx++;
-    }
+    const pageSlice = itemsWithHeight.slice(currentIndex, currentIndex + countForPage);
+    const col1Count = Math.ceil(countForPage / 2);
+    const col1 = pageSlice.slice(0, col1Count);
+    const col2 = pageSlice.slice(col1Count);
 
     pages.push({
       pageNumber: pageNum,
-      totalPages: 1,
+      totalPages: pageQuestionCounts.length,
       isFirstPage: isFirst,
       col1,
       col2,
-      col1Height,
-      col2Height
+      col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+      col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
     });
 
-    pageNum++;
+    currentIndex += countForPage;
+  }
+
+  // Safety fallback if any question remained
+  if (currentIndex < itemsWithHeight.length) {
+    const leftover = itemsWithHeight.slice(currentIndex);
+    if (pages.length > 0) {
+      const lastPage = pages[pages.length - 1];
+      const half = Math.ceil(leftover.length / 2);
+      lastPage.col1.push(...leftover.slice(0, half));
+      lastPage.col2.push(...leftover.slice(half));
+    }
   }
 
   const finalTotalPages = Math.max(1, pages.length);
@@ -1577,7 +1729,8 @@ export async function exportCompact2ColPdfTestPaper(
       pageDiv.style.left = '-9999px';
       pageDiv.style.top = '0';
       pageDiv.style.width = '794px'; // 210mm at 96 DPI
-      pageDiv.style.height = '1123px'; // 297mm at 96 DPI
+      pageDiv.style.minHeight = '1123px'; // 297mm at 96 DPI
+      pageDiv.style.height = 'auto';
       pageDiv.style.backgroundColor = '#ffffff';
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
@@ -1586,7 +1739,7 @@ export async function exportCompact2ColPdfTestPaper(
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'hidden';
+      pageDiv.style.overflow = 'visible';
 
       let headerHtml = '';
       if (page.isFirstPage) {
@@ -1658,13 +1811,14 @@ export async function exportCompact2ColPdfTestPaper(
       document.body.appendChild(pageDiv);
       await new Promise(resolve => setTimeout(resolve, 80));
 
+      const actualHeight = Math.max(1123, pageDiv.scrollHeight);
       const canvas = await html2canvas(pageDiv, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
-        height: 1123
+        height: actualHeight
       });
 
       if (document.body.contains(pageDiv)) {
@@ -1675,7 +1829,9 @@ export async function exportCompact2ColPdfTestPaper(
         pdf.addPage();
       }
 
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
+      const renderedMmHeight = (canvas.height * imgWidth) / canvas.width;
+      const printMmHeight = Math.min(pageHeight, renderedMmHeight);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, printMmHeight);
     }
 
     const fileName = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Paper_Saver.pdf`;
@@ -1919,7 +2075,8 @@ export async function exportCombinedBookletPdf(
       pageDiv.style.left = '-9999px';
       pageDiv.style.top = '0';
       pageDiv.style.width = '794px';
-      pageDiv.style.height = '1123px';
+      pageDiv.style.minHeight = '1123px';
+      pageDiv.style.height = 'auto';
       pageDiv.style.backgroundColor = '#ffffff';
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
@@ -1928,7 +2085,7 @@ export async function exportCombinedBookletPdf(
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'hidden';
+      pageDiv.style.overflow = 'visible';
 
       let headerHtml = '';
       if (page.isFirstPage) {
@@ -1993,13 +2150,14 @@ export async function exportCombinedBookletPdf(
       document.body.appendChild(pageDiv);
       await new Promise(resolve => setTimeout(resolve, 80));
 
+      const actualHeight = Math.max(1123, pageDiv.scrollHeight);
       const canvas = await html2canvas(pageDiv, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
-        height: 1123
+        height: actualHeight
       });
 
       if (document.body.contains(pageDiv)) {
@@ -2010,7 +2168,9 @@ export async function exportCombinedBookletPdf(
         pdf.addPage();
       }
 
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
+      const renderedMmHeight = (canvas.height * imgWidth) / canvas.width;
+      const printMmHeight = Math.min(pageHeight, renderedMmHeight);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, printMmHeight);
     }
 
     // 2. Render Answer Key Page
@@ -2293,9 +2453,8 @@ export function printNativeCompact2ColPaper(
           background: #ffffff;
           width: 210mm;
           min-height: 278mm;
-          max-height: 278mm;
           margin: 15px auto;
-          padding: 12mm 12mm 10mm 12mm;
+          padding: 10mm 12mm 8mm 12mm;
           position: relative;
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           page-break-after: always;
@@ -2305,14 +2464,14 @@ export function printNativeCompact2ColPaper(
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          overflow: hidden;
+          overflow: visible;
         }
         .page-inner {
           position: relative;
           z-index: 1;
           display: flex;
           flex-direction: column;
-          height: 100%;
+          min-height: 100%;
           justify-content: space-between;
           flex: 1;
         }
@@ -2352,10 +2511,11 @@ export function printNativeCompact2ColPaper(
           .print-page {
             box-shadow: none;
             margin: 0;
-            padding: 4mm 4mm 2mm 4mm;
+            padding: 5mm 6mm 4mm 6mm;
             width: 100%;
-            height: 100%;
-            max-height: 277mm;
+            min-height: 275mm;
+            height: auto;
+            max-height: none;
             page-break-after: always;
             break-after: page;
             page-break-inside: avoid;

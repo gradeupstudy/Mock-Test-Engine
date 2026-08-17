@@ -4,6 +4,7 @@ import {
   exportCompact2ColPdfTestPaper,
   exportCompact1PagePdfAnswerKey,
   exportCombinedBookletPdf,
+  exportWordBookletPaper,
   printNativeCompact2ColPaper,
   printNativeCompactAnswerKey,
   BookletCustomConfig,
@@ -393,6 +394,14 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     }
   };
 
+  const handleDownloadWordPaper = () => {
+    exportWordBookletPaper(activeQuestions, bookletConfig, false);
+  };
+
+  const handleDownloadWordCombined = () => {
+    exportWordBookletPaper(activeQuestions, bookletConfig, true);
+  };
+
   const handlePrintPaper = () => {
     printNativeCompact2ColPaper(activeQuestions, bookletConfig);
   };
@@ -593,6 +602,39 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                 <FileDown className="w-3.5 h-3.5" />
                 Download PDF (Key)
               </button>
+            </div>
+
+            {/* Word Document (.DOC / .DOCX) Export Options */}
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-sky-300 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-sky-400" />
+                  Microsoft Word Export
+                </span>
+                <span className="text-[10px] text-slate-400">Editable .doc</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleDownloadWordPaper}
+                  disabled={activeQuestions.length === 0}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 bg-sky-950/80 hover:bg-sky-900 text-sky-200 border border-sky-600/40 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                  title="Download editable 2-column test paper in Microsoft Word (.doc) format"
+                >
+                  <FileText className="w-3.5 h-3.5 text-sky-400" />
+                  Word (Paper)
+                </button>
+
+                <button
+                  onClick={handleDownloadWordCombined}
+                  disabled={activeQuestions.length === 0}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 bg-sky-900 hover:bg-sky-800 text-white border border-sky-500 rounded-lg text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50"
+                  title="Download combined test paper + answer key in Microsoft Word (.doc) format"
+                >
+                  <FileText className="w-3.5 h-3.5 text-sky-200" />
+                  Word (Paper + Key)
+                </button>
+              </div>
             </div>
 
             <button
