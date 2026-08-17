@@ -283,7 +283,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     autoBalance,
     page1Capacity: isManualCapacity ? manualPage1Cap : undefined,
     otherPageCapacity: isManualCapacity ? manualOtherCap : undefined,
-    customPages: customPages || undefined
+    customPages: paperPages
   }), [
     testTitle,
     duration,
@@ -299,7 +299,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     isManualCapacity,
     manualPage1Cap,
     manualOtherCap,
-    customPages
+    paperPages
   ]);
 
   // Reset custom layout if density or manual capacity or autoBalance changes
@@ -1742,9 +1742,13 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                     </div>
 
                     {/* A4 Sheet Container (Fixed Exact A4: 794px x 1123px) */}
-                    <div className={`w-[794px] min-w-[794px] max-w-[794px] h-[1123px] min-h-[1123px] max-h-[1123px] bg-white text-black shadow-2xl rounded-sm p-[20px_24px_16px_24px] relative font-sans flex flex-col justify-between overflow-hidden ${
-                      overflowInfo.isOverflow ? 'border-2 border-red-500 ring-4 ring-red-500/20' : 'border border-slate-300'
-                    }`}>
+                    <div
+                      id={`print-paper-sheet-${pageIdx}`}
+                      data-paper-sheet="true"
+                      className={`w-[794px] min-w-[794px] max-w-[794px] h-[1123px] min-h-[1123px] max-h-[1123px] bg-white text-black shadow-2xl rounded-sm p-[20px_24px_16px_24px] relative font-sans flex flex-col justify-between overflow-hidden ${
+                        overflowInfo.isOverflow ? 'border-2 border-red-500 ring-4 ring-red-500/20' : 'border border-slate-300'
+                      }`}
+                    >
                       {/* Diagonal Watermark Overlay */}
                       {showWatermark && watermarkText && (
                         <div
@@ -1845,7 +1849,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 }`}
                               >
                                 {/* Manual Shift Actions (Backspace & Enter & Option Split) Hover Toolbar */}
-                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
+                                <div data-pdf-hide="true" className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -2067,7 +2071,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
                                     {/* Quick Option-level Split Action Bar (Visible on full questions) */}
                                     {splitType === 'full' && (
-                                      <div className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
+                                      <div data-pdf-hide="true" className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -2133,7 +2137,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 }`}
                               >
                                 {/* Manual Shift Actions (Backspace & Enter & Option Split) Hover Toolbar */}
-                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
+                                <div data-pdf-hide="true" className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -2354,7 +2358,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
                                     {/* Quick Option-level Split Action Bar (Visible on full questions) */}
                                     {splitType === 'full' && (
-                                      <div className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
+                                      <div data-pdf-hide="true" className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();

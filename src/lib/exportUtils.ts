@@ -1888,102 +1888,123 @@ export async function exportCompact2ColPdfTestPaper(
   const imgWidth = 210;
   const pageHeight = 297;
 
+  // Check if live DOM preview sheets are rendered on screen (Exact WYSIWYG match)
+  const liveSheets: HTMLElement[] = [];
+  for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+    const el = document.getElementById(`print-paper-sheet-${pIdx}`);
+    if (el) liveSheets.push(el);
+  }
+  const hasAllLiveSheets = liveSheets.length === pages.length && pages.length > 0;
+
+  // Inject temporary print styles to suppress interactive controls during capture
+  let tempStyle: HTMLStyleElement | null = null;
   try {
+    tempStyle = document.createElement('style');
+    tempStyle.id = 'pdf-export-active-style';
+    tempStyle.innerHTML = `
+      [data-pdf-hide="true"], .group-hover\\:opacity-100 { display: none !important; opacity: 0 !important; visibility: hidden !important; }
+      [data-paper-sheet="true"] { border: 1px solid #000000 !important; box-shadow: none !important; border-radius: 0 !important; }
+    `;
+    document.head.appendChild(tempStyle);
+
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
     }
 
     for (let pIdx = 0; pIdx < pages.length; pIdx++) {
       const page = pages[pIdx];
-      const pageDiv = document.createElement('div');
-      pageDiv.style.position = 'absolute';
-      pageDiv.style.left = '-9999px';
-      pageDiv.style.top = '0';
-      pageDiv.style.width = '794px'; // 210mm at 96 DPI
-      pageDiv.style.height = '1123px'; // 297mm at 96 DPI
-      pageDiv.style.maxHeight = '1123px';
-      pageDiv.style.backgroundColor = '#ffffff';
-      pageDiv.style.color = '#000000';
-      pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
-      pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '20px 24px 16px 24px';
-      pageDiv.style.display = 'flex';
-      pageDiv.style.flexDirection = 'column';
-      pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'hidden';
+      let captureEl: HTMLElement;
+      let createdOffscreen = false;
 
-      let headerHtml = '';
-      if (page.isFirstPage) {
-        headerHtml = `
-          <div>
-            <!-- Top Exam Header -->
-            <div style="text-align: center; margin-bottom: 5px;">
-              ${logoHtml}
-              <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
-                ${escapeHtml(testTitle)}
-              </h1>
-              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
-                <span>Time Allowed: ${duration} Mins</span>
-                <span>|</span>
-                <span>Max Marks: ${marks}</span>
-                ${config.showRollNo !== false ? `<span>|</span><span>Roll No: ____________</span>` : ''}
+      if (hasAllLiveSheets && liveSheets[pIdx]) {
+        captureEl = liveSheets[pIdx];
+      } else {
+        createdOffscreen = true;
+        captureEl = document.createElement('div');
+        captureEl.style.position = 'absolute';
+        captureEl.style.left = '-9999px';
+        captureEl.style.top = '0';
+        captureEl.style.width = '794px'; // 210mm at 96 DPI
+        captureEl.style.height = '1123px'; // 297mm at 96 DPI
+        captureEl.style.maxHeight = '1123px';
+        captureEl.style.backgroundColor = '#ffffff';
+        captureEl.style.color = '#000000';
+        captureEl.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
+        captureEl.style.boxSizing = 'border-box';
+        captureEl.style.padding = '20px 24px 16px 24px';
+        captureEl.style.display = 'flex';
+        captureEl.style.flexDirection = 'column';
+        captureEl.style.justifyContent = 'space-between';
+        captureEl.style.overflow = 'hidden';
+
+        let headerHtml = '';
+        if (page.isFirstPage) {
+          headerHtml = `
+            <div>
+              <!-- Top Exam Header -->
+              <div style="text-align: center; margin-bottom: 5px;">
+                ${logoHtml}
+                <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
+                  ${escapeHtml(testTitle)}
+                </h1>
+                <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
+                  <span>Time Allowed: ${duration} Mins</span>
+                  <span>|</span>
+                  <span>Max Marks: ${marks}</span>
+                  ${config.showRollNo !== false ? `<span>|</span><span>Roll No: ____________</span>` : ''}
+                </div>
+              </div>
+
+              <!-- General Instructions Box -->
+              ${defaultInst ? `
+                <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
+                  <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
+                  ${escapeHtml(defaultInst).replace(/\\n/g, '<br/>')}
+                </div>
+              ` : ''}
+            </div>
+          `;
+        } else {
+          headerHtml = `
+            <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
+              <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
+              <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
+            </div>
+          `;
+        }
+
+        captureEl.innerHTML = `
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+            * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
+          </style>
+          ${watermarkHtml}
+          <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
+            <div>
+              ${headerHtml}
+            </div>
+
+            <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
+              <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+                ${renderColumnItems(page.col1)}
+              </div>
+              <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+                ${renderColumnItems(page.col2)}
               </div>
             </div>
 
-            <!-- General Instructions Box -->
-            ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
-                <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
-                ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
-              </div>
-            ` : ''}
+            <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
+              <span>${escapeHtml(footerText)}</span>
+              <span>Page ${page.pageNumber} of ${page.totalPages}</span>
+            </div>
           </div>
         `;
-      } else {
-        headerHtml = `
-          <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
-            <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
-            <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
-          </div>
-        `;
+
+        document.body.appendChild(captureEl);
+        await new Promise(resolve => setTimeout(resolve, 60));
       }
 
-      pageDiv.innerHTML = `
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
-          * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
-        </style>
-        ${watermarkHtml}
-        <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
-          <!-- Top Section -->
-          <div>
-            ${headerHtml}
-          </div>
-
-          <!-- 2-Column Boxed Layout with Outer Border on all 4 sides and Center Line -->
-          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
-            <!-- Left Column -->
-            <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
-              ${renderColumnItems(page.col1)}
-            </div>
-            <!-- Right Column -->
-            <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
-              ${renderColumnItems(page.col2)}
-            </div>
-          </div>
-
-          <!-- Page Bottom Footer with Page Number -->
-          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
-            <span>${escapeHtml(footerText)}</span>
-            <span>Page ${page.pageNumber} of ${page.totalPages}</span>
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(pageDiv);
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const canvas = await html2canvas(pageDiv, {
+      const canvas = await html2canvas(captureEl, {
         scale: 4, // 400 DPI Ultra HD crystal sharpness
         useCORS: true,
         allowTaint: true,
@@ -1995,15 +2016,14 @@ export async function exportCompact2ColPdfTestPaper(
         logging: false
       });
 
-      if (document.body.contains(pageDiv)) {
-        document.body.removeChild(pageDiv);
+      if (createdOffscreen && document.body.contains(captureEl)) {
+        document.body.removeChild(captureEl);
       }
 
       if (pIdx > 0) {
         pdf.addPage();
       }
 
-      // Use PNG with high-DPI canvas to completely eliminate lossy JPEG blur and compression artifacts
       pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, pageHeight, undefined, 'FAST');
     }
 
@@ -2012,6 +2032,10 @@ export async function exportCompact2ColPdfTestPaper(
   } catch (err: any) {
     console.error('2-Column PDF Generation Error:', err);
     alert('Failed to generate 2-Column PDF: ' + err.message);
+  } finally {
+    if (tempStyle && document.head.contains(tempStyle)) {
+      document.head.removeChild(tempStyle);
+    }
   }
 }
 
@@ -2125,7 +2149,7 @@ export async function exportCompact1PagePdfAnswerKey(
 
   try {
     const canvas = await html2canvas(container, {
-      scale: 3,
+      scale: 4, // Ultra-HD 400 DPI
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
@@ -2296,7 +2320,25 @@ export async function exportCombinedBookletPdf(
   const imgWidth = 210;
   const pageHeight = 297;
 
+  // Check if live DOM preview sheets are rendered on screen (Exact WYSIWYG match)
+  const liveSheets: HTMLElement[] = [];
+  for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+    const el = document.getElementById(`print-paper-sheet-${pIdx}`);
+    if (el) liveSheets.push(el);
+  }
+  const hasAllLiveSheets = liveSheets.length === pages.length && pages.length > 0;
+
+  // Inject temporary print styles to suppress interactive controls during capture
+  let tempStyle: HTMLStyleElement | null = null;
   try {
+    tempStyle = document.createElement('style');
+    tempStyle.id = 'pdf-export-combined-active-style';
+    tempStyle.innerHTML = `
+      [data-pdf-hide="true"], .group-hover\\:opacity-100 { display: none !important; opacity: 0 !important; visibility: hidden !important; }
+      [data-paper-sheet="true"] { border: 1px solid #000000 !important; box-shadow: none !important; border-radius: 0 !important; }
+    `;
+    document.head.appendChild(tempStyle);
+
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
     }
@@ -2304,88 +2346,96 @@ export async function exportCombinedBookletPdf(
     // 1. Render each Question Paper page
     for (let pIdx = 0; pIdx < pages.length; pIdx++) {
       const page = pages[pIdx];
-      const pageDiv = document.createElement('div');
-      pageDiv.style.position = 'absolute';
-      pageDiv.style.left = '-9999px';
-      pageDiv.style.top = '0';
-      pageDiv.style.width = '794px';
-      pageDiv.style.height = '1123px';
-      pageDiv.style.maxHeight = '1123px';
-      pageDiv.style.backgroundColor = '#ffffff';
-      pageDiv.style.color = '#000000';
-      pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
-      pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '20px 24px 16px 24px';
-      pageDiv.style.display = 'flex';
-      pageDiv.style.flexDirection = 'column';
-      pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'hidden';
+      let captureEl: HTMLElement;
+      let createdOffscreen = false;
 
-      let headerHtml = '';
-      if (page.isFirstPage) {
-        headerHtml = `
-          <div>
-            <div style="text-align: center; margin-bottom: 5px;">
-              ${logoHtml}
-              <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
-                ${escapeHtml(testTitle)}
-              </h1>
-              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
-                <span>Time Allowed: ${duration} Mins</span>
-                <span>|</span>
-                <span>Max Marks: ${marks}</span>
-                ${config.showRollNo !== false ? `<span>|</span><span>Roll No: ____________</span>` : ''}
+      if (hasAllLiveSheets && liveSheets[pIdx]) {
+        captureEl = liveSheets[pIdx];
+      } else {
+        createdOffscreen = true;
+        captureEl = document.createElement('div');
+        captureEl.style.position = 'absolute';
+        captureEl.style.left = '-9999px';
+        captureEl.style.top = '0';
+        captureEl.style.width = '794px';
+        captureEl.style.height = '1123px';
+        captureEl.style.maxHeight = '1123px';
+        captureEl.style.backgroundColor = '#ffffff';
+        captureEl.style.color = '#000000';
+        captureEl.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
+        captureEl.style.boxSizing = 'border-box';
+        captureEl.style.padding = '20px 24px 16px 24px';
+        captureEl.style.display = 'flex';
+        captureEl.style.flexDirection = 'column';
+        captureEl.style.justifyContent = 'space-between';
+        captureEl.style.overflow = 'hidden';
+
+        let headerHtml = '';
+        if (page.isFirstPage) {
+          headerHtml = `
+            <div>
+              <div style="text-align: center; margin-bottom: 5px;">
+                ${logoHtml}
+                <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
+                  ${escapeHtml(testTitle)}
+                </h1>
+                <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
+                  <span>Time Allowed: ${duration} Mins</span>
+                  <span>|</span>
+                  <span>Max Marks: ${marks}</span>
+                  ${config.showRollNo !== false ? `<span>|</span><span>Roll No: ____________</span>` : ''}
+                </div>
+              </div>
+
+              ${defaultInst ? `
+                <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
+                  <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
+                  ${escapeHtml(defaultInst).replace(/\\n/g, '<br/>')}
+                </div>
+              ` : ''}
+            </div>
+          `;
+        } else {
+          headerHtml = `
+            <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
+              <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
+              <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
+            </div>
+          `;
+        }
+
+        captureEl.innerHTML = `
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
+            * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
+          </style>
+          ${watermarkHtml}
+          <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
+            <div>
+              ${headerHtml}
+            </div>
+
+            <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
+              <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+                ${renderColumnItems(page.col1)}
+              </div>
+              <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
+                ${renderColumnItems(page.col2)}
               </div>
             </div>
 
-            ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 5px; font-size: 9.5px; line-height: 1.3; color: #000000; background: #ffffff;">
-                <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
-                ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
-              </div>
-            ` : ''}
+            <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
+              <span>${escapeHtml(footerText)}</span>
+              <span>Page ${page.pageNumber} of ${page.totalPages + 1}</span>
+            </div>
           </div>
         `;
-      } else {
-        headerHtml = `
-          <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
-            <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
-            <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
-          </div>
-        `;
+
+        document.body.appendChild(captureEl);
+        await new Promise(resolve => setTimeout(resolve, 60));
       }
 
-      pageDiv.innerHTML = `
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
-          * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
-        </style>
-        ${watermarkHtml}
-        <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative; z-index: 1;">
-          <div>
-            ${headerHtml}
-          </div>
-
-          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
-            <div style="padding: 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
-              ${renderColumnItems(page.col1)}
-            </div>
-            <div style="padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
-              ${renderColumnItems(page.col2)}
-            </div>
-          </div>
-
-          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
-            <span>${escapeHtml(footerText)}</span>
-            <span>Page ${page.pageNumber} of ${page.totalPages + 1}</span>
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(pageDiv);
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const canvas = await html2canvas(pageDiv, {
+      const canvas = await html2canvas(captureEl, {
         scale: 4, // 400 DPI Ultra HD crystal sharpness
         useCORS: true,
         allowTaint: true,
@@ -2397,8 +2447,8 @@ export async function exportCombinedBookletPdf(
         logging: false
       });
 
-      if (document.body.contains(pageDiv)) {
-        document.body.removeChild(pageDiv);
+      if (createdOffscreen && document.body.contains(captureEl)) {
+        document.body.removeChild(captureEl);
       }
 
       if (pIdx > 0) {
@@ -2487,12 +2537,14 @@ export async function exportCombinedBookletPdf(
     await new Promise(resolve => setTimeout(resolve, 100));
 
     const canvasAns = await html2canvas(ansKeyContainer, {
-      scale: 3, // High-res 300 DPI
+      scale: 4, // Ultra-HD 400 DPI
       useCORS: true,
       allowTaint: true,
       backgroundColor: '#ffffff',
       width: 794,
       height: 1123,
+      windowWidth: 794,
+      windowHeight: 1123,
       logging: false
     });
 
@@ -2508,6 +2560,10 @@ export async function exportCombinedBookletPdf(
   } catch (err: any) {
     console.error('Combined Booklet PDF Generation Error:', err);
     alert('Failed to generate Combined Booklet: ' + err.message);
+  } finally {
+    if (tempStyle && document.head.contains(tempStyle)) {
+      document.head.removeChild(tempStyle);
+    }
   }
 }
 
