@@ -12,7 +12,8 @@ import {
   shouldDisplayTranslation,
   paginateQuestionsFor2ColPaper,
   getRecommendedPageCapacities,
-  PaperPageLayout
+  PaperPageLayout,
+  PaperPageQuestion
 } from '../lib/exportUtils';
 import { optimizePrintLayoutWithAi, AiLayoutOptimizationResult } from '../lib/aiClient';
 import { PRESET_LOGOS } from '../lib/paperLogos';
@@ -48,6 +49,7 @@ import {
   Lock,
   Undo2,
   AlertCircle,
+  AlertTriangle,
   CornerDownLeft,
   CornerDownRight,
   Scissors,
@@ -122,6 +124,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportMessage, setExportMessage] = useState<string>('');
+  const [shiftWarningToast, setShiftWarningToast] = useState<string | null>(null);
 
   const [instructions, setInstructions] = useState<string>(
 `1. All questions are compulsory and carry equal marks.
@@ -300,6 +303,46 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     setCustomPages(null);
   }, [selectedSourceId, activeQuestions.length, density]);
 
+  // Calculation to detect if page content exceeds strict A4 boundary (297mm height / 1123px)
+  const checkPageOverflow = (page: PaperPageLayout) => {
+    const maxSafeHeight = page.isFirstPage ? 860 : 980;
+    const calcColHeight = (col: PaperPageQuestion[]) => {
+      return col.reduce((sum, item) => {
+        const q = item.question;
+        const qLen = (q.question || '').length;
+        const transLen = (q.translation || '').length;
+        let h = 30; // base question title
+        if (qLen > 65) h += 16;
+        if (qLen > 130) h += 16;
+        if (shouldDisplayTranslation(q.question, q.translation)) {
+          h += 16;
+          if (transLen > 65) h += 16;
+        }
+        const isShort = (q.optionA || '').length < 24 && (q.optionB || '').length < 24 && (q.optionC || '').length < 24 && (q.optionD || '').length < 24;
+        if (isShort) {
+          h += 28;
+        } else {
+          h += 56;
+        }
+        h += (density === 'ultra-compact' ? 8 : density === 'normal' ? 16 : 12);
+        return sum + h;
+      }, 0);
+    };
+
+    const col1H = calcColHeight(page.col1);
+    const col2H = calcColHeight(page.col2);
+    const maxH = Math.max(col1H, col2H);
+    const maxItemLimit = page.isFirstPage ? 18 : 22;
+    const isOverflow = maxH > maxSafeHeight || (page.col1.length + page.col2.length > maxItemLimit);
+    
+    return {
+      isOverflow,
+      col1Height: col1H,
+      col2Height: col2H,
+      maxSafeHeight
+    };
+  };
+
   // Manual MCQ Shifting Functions (Backspace / Enter / Page Transfer)
   const handleShiftQuestionBack = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
     const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
@@ -312,14 +355,17 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
 
     const [movedItem] = sourceCol.splice(itemIdxInCol, 1);
+    let targetPageIdx = pageIdx;
 
     if (colIdx === 2) {
       // Shift from Left of Col 2 to End of Col 1 on the same page
       current[pageIdx].col1.push(movedItem);
+      targetPageIdx = pageIdx;
     } else {
       // Shift from Col 1 of this page to Col 2 of previous page (if pageIdx > 0)
       if (pageIdx > 0) {
         current[pageIdx - 1].col2.push(movedItem);
+        targetPageIdx = pageIdx - 1;
       } else {
         // Can't move back from start of Page 1 Col 1
         sourceCol.splice(itemIdxInCol, 0, movedItem);
@@ -335,6 +381,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
       p.totalPages = total;
       p.isFirstPage = idx === 0;
     });
+
+    // Check if shifting caused the target page to overflow A4 limit
+    if (targetPageIdx >= 0 && targetPageIdx < cleaned.length) {
+      const overflowInfo = checkPageOverflow(cleaned[targetPageIdx]);
+      if (overflowInfo.isOverflow) {
+        setShiftWarningToast(`⚠️ Warning: Page ${targetPageIdx + 1} A4 sheet capacity (297mm) se exceed ho raha hai! Content cut ho sakta hai.`);
+        setTimeout(() => setShiftWarningToast(null), 5000);
+      }
+    }
 
     setCustomPages(cleaned);
   };
@@ -458,6 +513,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
       p.totalPages = total;
       p.isFirstPage = idx === 0;
     });
+
+    // Check target page overflow
+    if (toPageIdx >= 0 && toPageIdx < cleaned.length) {
+      const overflowInfo = checkPageOverflow(cleaned[toPageIdx]);
+      if (overflowInfo.isOverflow) {
+        setShiftWarningToast(`⚠️ Warning: Page ${toPageIdx + 1} A4 capacity limit se exceed ho raha hai!`);
+        setTimeout(() => setShiftWarningToast(null), 5000);
+      }
+    }
 
     setCustomPages(cleaned);
   };
@@ -1390,11 +1454,27 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
             </div>
           </div>
 
+          {/* Shift Overflow Toast Notification */}
+          {shiftWarningToast && (
+            <div className="w-full bg-red-600 border border-red-400 text-white px-4 py-2.5 rounded-xl shadow-xl flex items-center justify-between text-xs font-bold animate-bounce z-40">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0" />
+                <span>{shiftWarningToast}</span>
+              </div>
+              <button
+                onClick={() => setShiftWarningToast(null)}
+                className="bg-black/30 hover:bg-black/50 text-white px-2 py-0.5 rounded text-[11px]"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* DOCUMENT PREVIEW CONTAINER (Realistic White A4 Pages with Discrete Separation) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[860px] flex flex-col items-center gap-6">
             {/* Manual Pagination Banner & Controls */}
             {(activeTab === 'paper' || activeTab === 'combined') && (
-              <div className="w-full max-w-[760px] bg-slate-950 border border-slate-800 rounded-xl p-3 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="w-full max-w-[794px] bg-slate-950 border border-slate-800 rounded-xl p-3 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   {customPages ? (
                     <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1.5">
@@ -1429,8 +1509,29 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
             {/* 1. QUESTION PAPER VIEW OR COMBINED VIEW: Render each discrete page */}
             {(activeTab === 'paper' || activeTab === 'combined') && (
               <div className="w-full flex flex-col items-center gap-8">
-                {paperPages.map((page, pageIdx) => (
-                  <div key={page.pageNumber} className="w-full max-w-[760px] flex flex-col items-center">
+                {paperPages.map((page, pageIdx) => {
+                  const overflowInfo = checkPageOverflow(page);
+                  return (
+                  <div key={page.pageNumber} className="w-full max-w-[794px] flex flex-col items-center">
+                    {/* Overflow Banner */}
+                    {overflowInfo.isOverflow && (
+                      <div className="w-full max-w-[794px] bg-red-600 text-white rounded-lg px-3.5 py-2 mb-2 flex items-center justify-between text-xs font-semibold shadow-lg animate-pulse border border-red-400">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0" />
+                          <span>
+                            <strong>⚠️ A4 Overflow Warning:</strong> Is page par {page.col1.length + page.col2.length} MCQs hain, jo standard A4 physical sheet (297mm) se zyada hain. PDF me bottom content cut ho sakta hai.
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleShiftQuestionForward(pageIdx, 2, page.col2.length - 1)}
+                          className="bg-white hover:bg-amber-50 text-red-700 font-extrabold text-[11px] px-2.5 py-1 rounded shadow ml-3 whitespace-nowrap"
+                          title="Shift last question to next page"
+                        >
+                          Shift Last MCQ →
+                        </button>
+                      </div>
+                    )}
+
                     {/* Page Break Label */}
                     <div className="w-full flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
                       <div className="flex items-center gap-2">
@@ -1440,6 +1541,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                         <span className="text-[11px] text-slate-400">
                           {page.col1.length + page.col2.length} MCQs ({page.col1.length} Left, {page.col2.length} Right)
                         </span>
+                        {overflowInfo.isOverflow && (
+                          <span className="bg-red-600 text-white font-extrabold text-[10px] px-2 py-0.5 rounded shadow">
+                            ⚠️ OVERFLOW (A4 Limit Exceeded)
+                          </span>
+                        )}
                       </div>
 
                       {/* Quick Page Transfer Buttons */}
@@ -1467,8 +1573,10 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       </div>
                     </div>
 
-                    {/* A4 Sheet Container */}
-                    <div className="w-full max-w-[794px] bg-white text-black shadow-2xl rounded-sm p-5 lg:p-6 relative min-h-[1050px] font-sans flex flex-col justify-between border border-slate-300 overflow-hidden">
+                    {/* A4 Sheet Container (Fixed Exact A4: 794px x 1123px) */}
+                    <div className={`w-[794px] min-w-[794px] max-w-[794px] h-[1123px] min-h-[1123px] max-h-[1123px] bg-white text-black shadow-2xl rounded-sm p-[20px_24px_16px_24px] relative font-sans flex flex-col justify-between overflow-hidden ${
+                      overflowInfo.isOverflow ? 'border-2 border-red-500 ring-4 ring-red-500/20' : 'border border-slate-300'
+                    }`}>
                       {/* Diagonal Watermark Overlay */}
                       {showWatermark && watermarkText && (
                         <div
@@ -1836,13 +1944,14 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             )}
 
             {/* 2. ANSWER KEY VIEW (1-Page Ultra-Compact) */}
             {(activeTab === 'answer-key' || activeTab === 'combined') && (
-              <div className="w-full max-w-[760px]">
+              <div className="w-full max-w-[794px]">
                 <div className="w-full flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
                   <span className="font-mono font-bold text-slate-300">
                     🔑 Answer Key Page (1 Single Sheet)
@@ -1852,7 +1961,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                   </span>
                 </div>
 
-                <div className="w-full bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 relative min-h-[960px] font-sans flex flex-col justify-between border border-slate-300">
+                <div className="w-[794px] min-w-[794px] max-w-[794px] h-[1123px] min-h-[1123px] max-h-[1123px] bg-white text-black shadow-2xl rounded-sm p-[20px_24px_16px_24px] relative font-sans flex flex-col justify-between border border-slate-300 overflow-hidden">
                   {/* Diagonal Watermark */}
                   {showWatermark && watermarkText && (
                     <div

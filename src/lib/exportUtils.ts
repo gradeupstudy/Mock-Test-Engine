@@ -1695,12 +1695,12 @@ export async function exportCompact2ColPdfTestPaper(
 
   // Question styling based on density - precisely aligned with live preview
   const fontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11.5px' : '10.5px';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '8px' : '5px';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11px' : '10px';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '4px' : config.fontSize === 'normal' ? '8px' : '6px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
-    logoHtml = `<div style="text-align: center; margin-bottom: 3px;"><img src="${config.logoDataUrl}" style="height: 42px; width: auto; object-fit: contain;" /></div>`;
+    logoHtml = `<div style="text-align: center; margin-bottom: 4px;"><img src="${config.logoDataUrl}" style="height: 44px; width: auto; object-fit: contain;" /></div>`;
   }
 
   const watermarkHtml = watermark ? `
@@ -1726,24 +1726,24 @@ export async function exportCompact2ColPdfTestPaper(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; position: relative; z-index: 1;">
-          <div style="font-weight: 700; color: #000000; margin-bottom: 2px;">
+        <div style="padding: 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
+          <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${fontPt}; line-height: 1.3;">
+            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
               <div>${optD}</div>
             </div>
           ` : `
-            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
+            <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
@@ -2051,13 +2051,14 @@ export async function exportCombinedBookletPdf(
   const opacity = config.watermarkOpacity !== undefined ? config.watermarkOpacity : 0.08;
   const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
+  // Question styling based on density - precisely aligned with live preview
   const fontPt = config.fontSize === 'ultra-compact' ? '10px' : config.fontSize === 'normal' ? '12px' : '11px';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11.5px' : '10.5px';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '8px' : '5px';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '9.5px' : config.fontSize === 'normal' ? '11px' : '10px';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '4px' : config.fontSize === 'normal' ? '8px' : '6px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
-    logoHtml = `<div style="text-align: center; margin-bottom: 3px;"><img src="${config.logoDataUrl}" style="height: 42px; width: auto; object-fit: contain;" /></div>`;
+    logoHtml = `<div style="text-align: center; margin-bottom: 4px;"><img src="${config.logoDataUrl}" style="height: 44px; width: auto; object-fit: contain;" /></div>`;
   }
 
   const watermarkHtml = watermark ? `
@@ -2083,24 +2084,24 @@ export async function exportCombinedBookletPdf(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; position: relative; z-index: 1;">
-          <div style="font-weight: 700; color: #000000; margin-bottom: 2px;">
+        <div style="padding: 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
+          <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${fontPt}; line-height: 1.3;">
+            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
               ${escapeHtml(formatMathSymbols(q.translation!))}
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
               <div>${optD}</div>
             </div>
           ` : `
-            <div style="display: flex; flex-direction: column; gap: 1px; font-size: ${optFontPt}; color: #000000; line-height: 1.25;">
+            <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
