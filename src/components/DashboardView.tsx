@@ -14,7 +14,8 @@ import {
   TrendingUp,
   Layers,
   CopyCheck,
-  AlertTriangle
+  AlertTriangle,
+  Printer
 } from 'lucide-react';
 import { ActiveModule } from './Navbar';
 import {
@@ -215,6 +216,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* 2-Column Page-Saver Paper Quick Banner */}
+      <div className="bg-gradient-to-r from-blue-950/60 via-indigo-950/60 to-slate-900 border border-blue-500/40 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center flex-shrink-0">
+            <Printer className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-bold text-white">2-Column Print Paper & 1-Page Answer Key Studio</h4>
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full font-bold">
+                NEW
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 mt-0.5">
+              Print exam-ready 2-column booklets and ultra-compact 1-page answer keys for students. Saves ~65% printed pages.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => onNavigate('print-paper')}
+          className="flex-shrink-0 flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all shadow-md active:scale-95"
+        >
+          <span>Open Print Studio</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       {/* 6 Stat Cards Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">

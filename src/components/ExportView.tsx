@@ -8,8 +8,14 @@ import {
   exportDocxAnswerKey,
   exportAppOnlineMockTestDocx,
   printNativeTestPaper,
-  printNativeAnswerKey
+  printNativeAnswerKey,
+  exportCompact2ColPdfTestPaper,
+  exportCompact1PagePdfAnswerKey,
+  exportCombinedBookletPdf,
+  printNativeCompact2ColPaper,
+  printNativeCompactAnswerKey
 } from '../lib/exportUtils';
+import { PRESET_LOGOS } from '../lib/paperLogos';
 
 export function resolveMockQuestions(mock: MockHistory, allQuestions: Question[]): Question[] {
   // 1. If full question snapshot exists in mock.questions, return it directly!
@@ -66,6 +72,7 @@ interface ExportViewProps {
   onDeleteMock?: (mock: MockHistory) => void;
   onLoadMockFromHistory: (mock: MockHistory, questions: Question[]) => void;
   onNavigateToTemplates: () => void;
+  onNavigateToPrintPaper?: () => void;
 }
 
 export const ExportView: React.FC<ExportViewProps> = ({
@@ -78,7 +85,8 @@ export const ExportView: React.FC<ExportViewProps> = ({
   duration,
   onDeleteMock,
   onLoadMockFromHistory,
-  onNavigateToTemplates
+  onNavigateToTemplates,
+  onNavigateToPrintPaper
 }) => {
   const [activeTestName, setActiveTestName] = useState<string>(testName);
   const [activeMarks, setActiveMarks] = useState<number>(totalMarks);
@@ -86,6 +94,74 @@ export const ExportView: React.FC<ExportViewProps> = ({
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const [isExportingAnswerKey, setIsExportingAnswerKey] = useState<boolean>(false);
   const [isExportingAppOnline, setIsExportingAppOnline] = useState<boolean>(false);
+  const [isExporting2ColPdf, setIsExporting2ColPdf] = useState<boolean>(false);
+  const [isExporting1PageKey, setIsExporting1PageKey] = useState<boolean>(false);
+  const [isExportingCombined, setIsExportingCombined] = useState<boolean>(false);
+
+  const handleExport2ColPdf = async () => {
+    if (currentQuestions.length === 0) {
+      alert('No questions loaded to export.');
+      return;
+    }
+    setIsExporting2ColPdf(true);
+    try {
+      await exportCompact2ColPdfTestPaper(currentQuestions, {
+        testName: activeTestName,
+        duration: activeDuration,
+        totalMarks: activeMarks,
+        watermarkText: template.watermarkText || 'Gradeup Study',
+        logoDataUrl: PRESET_LOGOS[0].svgDataUrl,
+        fontSize: 'compact'
+      });
+    } catch (err: any) {
+      alert('Failed to generate 2-Column PDF: ' + err.message);
+    } finally {
+      setIsExporting2ColPdf(false);
+    }
+  };
+
+  const handleExport1PageAnswerKeyPdf = async () => {
+    if (currentQuestions.length === 0) {
+      alert('No questions loaded to export.');
+      return;
+    }
+    setIsExporting1PageKey(true);
+    try {
+      await exportCompact1PagePdfAnswerKey(currentQuestions, {
+        testName: activeTestName,
+        duration: activeDuration,
+        totalMarks: activeMarks,
+        watermarkText: template.watermarkText || 'Gradeup Study',
+        logoDataUrl: PRESET_LOGOS[0].svgDataUrl
+      });
+    } catch (err: any) {
+      alert('Failed to generate 1-Page Answer Key PDF: ' + err.message);
+    } finally {
+      setIsExporting1PageKey(false);
+    }
+  };
+
+  const handleExportCombinedBooklet = async () => {
+    if (currentQuestions.length === 0) {
+      alert('No questions loaded to export.');
+      return;
+    }
+    setIsExportingCombined(true);
+    try {
+      await exportCombinedBookletPdf(currentQuestions, {
+        testName: activeTestName,
+        duration: activeDuration,
+        totalMarks: activeMarks,
+        watermarkText: template.watermarkText || 'Gradeup Study',
+        logoDataUrl: PRESET_LOGOS[0].svgDataUrl,
+        fontSize: 'compact'
+      });
+    } catch (err: any) {
+      alert('Failed to generate Combined Booklet PDF: ' + err.message);
+    } finally {
+      setIsExportingCombined(false);
+    }
+  };
 
   const handleExportPdf = async () => {
     if (currentQuestions.length === 0) {
@@ -211,7 +287,86 @@ export const ExportView: React.FC<ExportViewProps> = ({
         </div>
       </div>
 
-      {/* Featured Card: App Online Mock Test */}
+      {/* Featured Card 1: 2-Column Page-Saver Booklet (New Dedicated Option) */}
+      <div className="bg-gradient-to-r from-[#0d233a] via-[#122b4d] to-[#0f1d38] border border-blue-500/40 p-6 rounded-2xl shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+          <Printer className="w-36 h-36 text-blue-400" />
+        </div>
+
+        <div className="relative z-10 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/20 border border-blue-400/40 text-blue-300 flex items-center justify-center shadow-inner">
+                <Printer className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-lg font-extrabold text-white">2-Column Page-Saver Booklet & 1-Page Answer Key</h3>
+                  <span className="text-[10px] font-extrabold bg-blue-500/30 text-blue-300 border border-blue-400/40 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    Paper-Saver Mode (New)
+                  </span>
+                </div>
+                <p className="text-xs text-blue-100/80 mt-0.5 max-w-3xl">
+                  Official boxed 2-column layout (Left & Right columns with center dividing border, custom HP Police / Gradeup logo, watermark) and 1-page ultra-compact answer sheet. Cuts printed paper usage by ~65%.
+                </p>
+              </div>
+            </div>
+
+            {onNavigateToPrintPaper && (
+              <button
+                onClick={onNavigateToPrintPaper}
+                className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-[0.98]"
+              >
+                <span>Open Full Print Studio</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-3 pt-2 flex-wrap gap-2">
+            <button
+              onClick={handleExport2ColPdf}
+              disabled={isExporting2ColPdf || currentQuestions.length === 0}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center space-x-2"
+            >
+              {isExporting2ColPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>Download 2-Col Question Paper PDF</span>
+            </button>
+
+            <button
+              onClick={handleExport1PageAnswerKeyPdf}
+              disabled={isExporting1PageKey || currentQuestions.length === 0}
+              className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center space-x-2"
+            >
+              {isExporting1PageKey ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>Download 1-Page Answer Key PDF</span>
+            </button>
+
+            <button
+              onClick={handleExportCombinedBooklet}
+              disabled={isExportingCombined || currentQuestions.length === 0}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs transition-colors flex items-center space-x-2"
+            >
+              {isExportingCombined ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Layers className="w-4 h-4 text-emerald-400" />
+              )}
+              <span>Download Combined (Paper + Key)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Featured Card 2: App Online Mock Test */}
       <div className="bg-gradient-to-r from-[#0c1e38] via-[#10274c] to-[#0d1a33] border border-cyan-500/40 p-6 rounded-2xl shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
           <Globe className="w-32 h-32 text-cyan-400" />

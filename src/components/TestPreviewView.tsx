@@ -35,7 +35,8 @@ import {
   ArrowLeftRight,
   RefreshCw,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Printer
 } from 'lucide-react';
 
 // Helper: Extract Exam Category Name from Test Title (e.g. "HP Home Guard Mock Test - 24" -> "HP Home Guard")
@@ -61,6 +62,7 @@ interface TestPreviewViewProps {
   mockHistory?: MockHistory[];
   onUpdateTestQuestions: (qs: Question[]) => void;
   onNavigateToExport: () => void;
+  onNavigateToPrintPaper?: () => void;
 }
 
 export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
@@ -72,7 +74,8 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   allBankQuestions = [],
   mockHistory = [],
   onUpdateTestQuestions,
-  onNavigateToExport
+  onNavigateToExport,
+  onNavigateToPrintPaper
 }) => {
   const [questions, setQuestions] = useState<Question[]>(testQuestions);
   const [isSaved, setIsSaved] = useState<boolean>(false);
@@ -986,6 +989,19 @@ Return ONLY valid JSON matching this schema:
             <Save className="w-4 h-4 text-emerald-400" />
             <span>{isSaved ? 'Saved!' : 'Save All Edits'}</span>
           </button>
+
+          {onNavigateToPrintPaper && (
+            <button
+              onClick={() => {
+                handleSaveAll();
+                onNavigateToPrintPaper();
+              }}
+              className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-md transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print Paper (2-Col)</span>
+            </button>
+          )}
 
           <button
             onClick={() => {

@@ -5,12 +5,11 @@ import { BulkUploadView } from './components/BulkUploadView';
 import { QuestionBankView } from './components/QuestionBankView';
 import { MockCreatorView } from './components/MockCreatorView';
 import { TestPreviewView } from './components/TestPreviewView';
+import { PrintPaperView } from './components/PrintPaperView';
 import { TemplatesView } from './components/TemplatesView';
 import { ExportView } from './components/ExportView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { BackupView } from './components/BackupView';
-import { OnlineStudentPortalView } from './components/OnlineStudentPortalView';
-import { OnlineMocksAdminView } from './components/OnlineMocksAdminView';
 import { GeminiModal } from './components/GeminiModal';
 import { DuplicateModal } from './components/DuplicateModal';
 
@@ -111,15 +110,6 @@ export function App() {
   const [isGeminiModalOpen, setIsGeminiModalOpen] = useState<boolean>(false);
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState<boolean>(false);
   const [aiConfig, setAiConfig] = useState<AiConfig>(getStoredAiConfig);
-
-  // Student Public Mock Portal State from URL query ?publicMock=
-  const [publicShareId, setPublicShareId] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('publicMock') || params.get('onlineTest') || null;
-    }
-    return null;
-  });
 
   // Initial Data Load
   const loadDatabaseData = async () => {
@@ -417,23 +407,6 @@ export function App() {
     );
   }
 
-  if (publicShareId) {
-    return (
-      <OnlineStudentPortalView
-        shareId={publicShareId}
-        onExitPortal={() => {
-          setPublicShareId(null);
-          if (typeof window !== 'undefined') {
-            const url = new URL(window.location.href);
-            url.searchParams.delete('publicMock');
-            url.searchParams.delete('onlineTest');
-            window.history.replaceState({}, '', url.toString());
-          }
-        }}
-      />
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#0d1233] text-slate-100 flex flex-col font-sans selection:bg-blue-500/30">
       {/* Top Header */}
@@ -522,6 +495,24 @@ export function App() {
               mockHistory={mockHistory}
               onUpdateTestQuestions={handleUpdateTestQuestions}
               onNavigateToExport={() => setActiveTab('export')}
+              onNavigateToPrintPaper={() => setActiveTab('print-paper')}
+            />
+          )}
+
+          {activeTab === 'print-paper' && (
+            <PrintPaperView
+              currentTestQuestions={activeTestQuestions}
+              currentTestName={activeTestName}
+              currentDuration={activeTestDuration}
+              currentTotalMarks={activeTestMarks}
+              mockHistory={mockHistory}
+              onSelectMock={(mock) => {
+                const qs = mock.questions && mock.questions.length > 0 ? mock.questions : [];
+                setActiveTestQuestions(qs);
+                setActiveTestName(mock.testName);
+                setActiveTestMarks(mock.marks || qs.length * 2);
+                setActiveTestDuration(mock.duration || 60);
+              }}
             />
           )}
 
@@ -566,6 +557,7 @@ export function App() {
                 setActiveTab('preview');
               }}
               onNavigateToTemplates={() => setActiveTab('templates')}
+              onNavigateToPrintPaper={() => setActiveTab('print-paper')}
             />
           )}
 
@@ -579,15 +571,6 @@ export function App() {
               mockHistory={mockHistory}
               onDataRestored={loadDatabaseData}
               onClearAll={handleClearAllQuestions}
-            />
-          )}
-
-          {activeTab === 'online_mocks' && (
-            <OnlineMocksAdminView
-              mockHistory={mockHistory}
-              activeTestQuestions={activeTestQuestions}
-              activeTestName={activeTestName}
-              onOpenStudentPortal={(shareId) => setPublicShareId(shareId)}
             />
           )}
         </main>

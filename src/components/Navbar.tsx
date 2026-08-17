@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Menu,
   X,
-  Globe
+  Printer
 } from 'lucide-react';
 import { AiConfig } from '../types';
 import { AiEngineIndicator } from './AiEngineIndicator';
@@ -26,11 +26,11 @@ export type ActiveModule =
   | 'bank'
   | 'creator'
   | 'preview'
+  | 'print-paper'
   | 'templates'
   | 'export'
   | 'analytics'
-  | 'backup'
-  | 'online_mocks';
+  | 'backup';
 
 interface NavbarProps {
   onOpenGeminiModal: () => void;
@@ -109,8 +109,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'bank', label: 'Question Bank', icon: Layers },
     { id: 'creator', label: 'Mock Test Creator', icon: Brain },
     { id: 'preview', label: 'Test Preview', icon: SquarePen },
+    { id: 'print-paper', label: 'Print Paper (2-Col)', icon: Printer },
     { id: 'templates', label: 'Templates', icon: Paintbrush },
-    { id: 'online_mocks', label: 'Online Share & Results', icon: Globe },
     { id: 'export', label: 'Export', icon: Download },
     { id: 'analytics', label: 'Analytics', icon: BarChart2 },
     { id: 'backup', label: 'Backup', icon: Database },
