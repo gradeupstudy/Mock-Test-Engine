@@ -16,6 +16,13 @@ import {
   PaperPageQuestion,
   estimateQuestionRenderHeight
 } from '../lib/exportUtils';
+import {
+  measureQuestionsActualHeight,
+  measureHeaderFooterDimensions,
+  paginateQuestionsA4MasterEngine,
+  validatePrintLayoutReport,
+  LayoutValidationReport
+} from '../lib/a4PaginationEngine';
 import { optimizePrintLayoutWithAi, AiLayoutOptimizationResult } from '../lib/aiClient';
 import { PRESET_LOGOS } from '../lib/paperLogos';
 import {
@@ -109,6 +116,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   const [isManualCapacity, setIsManualCapacity] = useState<boolean>(false);
   const [isLiveEditMode, setIsLiveEditMode] = useState<boolean>(false);
   const [customPages, setCustomPages] = useState<PaperPageLayout[] | null>(null);
+  const [measuredPaperPages, setMeasuredPaperPages] = useState<PaperPageLayout[] | null>(null);
+  const [layoutReport, setLayoutReport] = useState<LayoutValidationReport | null>(null);
+  const [isEngineMeasuring, setIsEngineMeasuring] = useState<boolean>(false);
 
   // AI Auto-Fix State
   const [isAiOptimizing, setIsAiOptimizing] = useState<boolean>(false);
@@ -251,8 +261,107 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     return preset ? preset.svgDataUrl : '';
   }, [selectedLogoId, customLogoUrl]);
 
-  // Calculate automatic discrete layout pages
-  const autoPaperPages: PaperPageLayout[] = useMemo(() => {
+  // Asynchronous Physical DOM Measurement & Pagination Engine
+  useEffect(() => {
+    let isCancelled = false;
+    const runMeasurementEngine = async () => {
+      if (activeQuestions.length === 0) {
+        setMeasuredPaperPages([]);
+        setLayoutReport(null);
+        return;
+      }
+
+      setIsEngineMeasuring(true);
+      try {
+        // Measure header & footer dimensions
+        const dims = measureHeaderFooterDimensions(
+          testTitle,
+          duration,
+          totalMarks,
+          instructions,
+          activeLogoDataUrl,
+          showRollNo
+        );
+
+        // Measure actual question rendered DOM heights
+        const measuredQuestions = await measureQuestionsActualHeight(activeQuestions, density);
+
+        if (isCancelled) return;
+
+        // Paginate using Master Engine
+        const enginePages = paginateQuestionsA4MasterEngine(
+          measuredQuestions,
+          dims,
+          autoBalance,
+          isManualCapacity ? manualPage1Cap : undefined,
+          isManualCapacity ? manualOtherCap : undefined
+        );
+
+        // Map to PaperPageLayout format
+        const formattedPages: PaperPageLayout[] = enginePages.map(ep => ({
+          pageNumber: ep.pageNumber,
+          totalPages: ep.totalPages,
+          isFirstPage: ep.isFirstPage,
+          col1: ep.col1.map(cq => ({
+            question: cq.question,
+            originalIndex: cq.originalIndex,
+            estimatedHeight: cq.height,
+            splitType: cq.splitType
+          })),
+          col2: ep.col2.map(cq => ({
+            question: cq.question,
+            originalIndex: cq.originalIndex,
+            estimatedHeight: cq.height,
+            splitType: cq.splitType
+          })),
+          col1Height: ep.col1Height,
+          col2Height: ep.col2Height,
+          availableHeight: ep.availableHeight,
+          utilization: ep.utilization,
+          balanceScore: ep.balanceScore,
+          unusedSpace: ep.unusedSpace,
+          hasOverflow: ep.hasOverflow,
+          warnings: ep.warnings
+        }));
+
+        // Validate layout report
+        const report = validatePrintLayoutReport(enginePages, activeQuestions);
+
+        if (!isCancelled) {
+          setMeasuredPaperPages(formattedPages);
+          setLayoutReport(report);
+        }
+      } catch (err) {
+        console.warn('Physical measurement engine fallback:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsEngineMeasuring(false);
+        }
+      }
+    };
+
+    const timer = setTimeout(runMeasurementEngine, 60);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    activeQuestions,
+    density,
+    testTitle,
+    duration,
+    totalMarks,
+    instructions,
+    activeLogoDataUrl,
+    showRollNo,
+    autoBalance,
+    isManualCapacity,
+    manualPage1Cap,
+    manualOtherCap
+  ]);
+
+  // Synchronous fallback / baseline pages
+  const fallbackPaperPages: PaperPageLayout[] = useMemo(() => {
     return paginateQuestionsFor2ColPaper(
       activeQuestions,
       density,
@@ -262,10 +371,10 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     );
   }, [activeQuestions, density, isManualCapacity, manualPage1Cap, manualOtherCap, autoBalance]);
 
-  // Effective pages either come from manual user adjustments or automatic calculation
+  // Effective pages come from: Custom user shifts -> Measured Engine Pages -> Fallback estimation
   const paperPages: PaperPageLayout[] = useMemo(() => {
-    return customPages || autoPaperPages;
-  }, [customPages, autoPaperPages]);
+    return customPages || measuredPaperPages || fallbackPaperPages;
+  }, [customPages, measuredPaperPages, fallbackPaperPages]);
 
   // Build config object
   const bookletConfig: BookletCustomConfig = useMemo(() => ({
@@ -310,8 +419,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   // Calculation to detect if page content exceeds strict A4 boundary (297mm height / 1123px)
   const checkPageOverflow = (page: PaperPageLayout) => {
     const maxSafeHeight = page.isFirstPage
-      ? (density === 'ultra-compact' ? 930 : density === 'normal' ? 840 : 890)
-      : (density === 'ultra-compact' ? 1040 : density === 'normal' ? 960 : 1010);
+      ? (density === 'ultra-compact' ? 840 : density === 'normal' ? 760 : 800)
+      : (density === 'ultra-compact' ? 1010 : density === 'normal' ? 940 : 980);
 
     const calcColHeight = (col: PaperPageQuestion[]) => {
       return col.reduce((sum, item) => sum + estimateQuestionRenderHeight(item.question, density, item.splitType), 0);
@@ -321,8 +430,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     const col2H = calcColHeight(page.col2);
     const maxH = Math.max(col1H, col2H);
     const maxItemLimit = page.isFirstPage
-      ? (density === 'ultra-compact' ? 28 : density === 'normal' ? 20 : 26)
-      : (density === 'ultra-compact' ? 36 : density === 'normal' ? 26 : 32);
+      ? (density === 'ultra-compact' ? 24 : density === 'normal' ? 16 : 20)
+      : (density === 'ultra-compact' ? 32 : density === 'normal' ? 24 : 28);
 
     const isOverflow = maxH > maxSafeHeight || (page.col1.length + page.col2.length > maxItemLimit);
     
@@ -336,7 +445,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   // Manual MCQ Shifting Functions (Backspace / Enter / Page Transfer)
   const handleShiftQuestionBack = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -386,7 +495,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   };
 
   const handleShiftQuestionForward = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -430,7 +539,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   };
 
   const handlePushBreakToNextPage = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -473,7 +582,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   };
 
   const handleTransferQuestionBetweenPages = (fromPageIdx: number, toPageIdx: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -519,7 +628,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   // Split Question & Options into separate items (Question remains, Options move to next column or page)
   const handleSplitQuestionAndOptions = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -576,7 +685,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   // Split Options A,B and C,D
   const handleSplitOptionsAB_CD = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -630,7 +739,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   // Merge split question and options back into a single full question
   const handleMergeSplitItem = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
-    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+    const current: PaperPageLayout[] = paperPages.map(p => ({
       ...p,
       col1: [...p.col1],
       col2: [...p.col2]
@@ -779,30 +888,29 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
       setAutoBalance(false);
       setManualPage1Cap(totalN);
       setManualOtherCap(totalN);
-      if (totalN > 24) setDensity('ultra-compact');
+      if (totalN > 20) setDensity('ultra-compact');
       return;
     }
 
-    // Distribute across target pages
-    let p1 = Math.floor(totalN / targetPages);
+    // Distribute across target pages: Page 1 holds ~75% of other pages due to header + instructions
+    let p1 = Math.min(20, Math.floor((totalN / targetPages) * 0.75));
     if (p1 % 2 !== 0) p1 += 1;
-    p1 = Math.min(24, Math.max(8, p1 - 2));
-    if (p1 % 2 !== 0) p1 += 1;
+    p1 = Math.max(8, p1);
 
     const remaining = totalN - p1;
     const numOthers = targetPages - 1;
     let other = Math.ceil(remaining / numOthers);
     if (other % 2 !== 0) other += 1;
-    other = Math.min(34, Math.max(10, other));
+    other = Math.min(32, Math.max(10, other));
 
     setIsManualCapacity(true);
     setAutoBalance(false);
     setManualPage1Cap(p1);
     setManualOtherCap(other);
 
-    if (other > 28 || p1 > 22) {
+    if (other > 28 || p1 > 20) {
       setDensity('ultra-compact');
-    } else if (other <= 22 && p1 <= 16) {
+    } else if (other <= 22 && p1 <= 14) {
       setDensity('normal');
     } else {
       setDensity('compact');
@@ -1762,6 +1870,48 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
           {/* DOCUMENT PREVIEW CONTAINER (Realistic White A4 Pages with Discrete Separation) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[860px] flex flex-col items-center gap-6">
+            {/* Master Engine Layout Health & Quality Bar */}
+            {(activeTab === 'paper' || activeTab === 'combined') && layoutReport && (
+              <div className="w-full max-w-[794px] bg-gradient-to-r from-slate-950 via-indigo-950/40 to-slate-950 border border-indigo-500/30 rounded-xl p-3 shadow-lg flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-300">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>A4 Master Engine:</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded font-mono font-bold">
+                      {layoutReport.averageUtilization}% Space Utilized
+                    </span>
+                    <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded font-mono font-bold">
+                      {layoutReport.averageBalance}% Col Balance
+                    </span>
+                    {layoutReport.isPass ? (
+                      <span className="px-2 py-0.5 bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 rounded font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        Zero Clipping
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                        {layoutReport.overflowCount} Page(s) Need Adjustment
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-300 font-medium">
+                  {isEngineMeasuring ? (
+                    <span className="flex items-center gap-1 text-amber-300">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      Measuring DOM heights...
+                    </span>
+                  ) : (
+                    <span>Exact A4 Physical Calibration (210×297mm)</span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Manual Pagination Banner & Controls */}
             {(activeTab === 'paper' || activeTab === 'combined') && (
               <div className="w-full max-w-[794px] bg-slate-950 border border-slate-800 rounded-xl p-3 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -1936,9 +2086,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       </div>
 
                       {/* 2-Column Boxed Questions Grid with Full Outer Border and Center Line */}
-                      <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-1 overflow-hidden">
+                      <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-1">
                         {/* Left Column (Uniform vertical spacing, no justify-between stretching) */}
-                        <div className="p-2 border-r-[1.5px] border-black flex flex-col justify-start space-y-1.5 overflow-hidden">
+                        <div className="p-2 border-r-[1.5px] border-black flex flex-col justify-start space-y-1.5">
                           {page.col1.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
@@ -2226,7 +2376,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                         </div>
 
                         {/* Right Column (Uniform vertical spacing, no justify-between stretching) */}
-                        <div className="p-2 flex flex-col justify-start space-y-1.5 overflow-hidden">
+                        <div className="p-2 flex flex-col justify-start space-y-1.5">
                           {page.col2.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;

@@ -18,7 +18,7 @@ export function getAiEngineDetails(config: AiConfig, activeKeyIndex?: number) {
 
   let providerName = 'Google Gemini';
   let providerShort = 'Gemini';
-  let defaultModel = 'gemini-3.6-flash';
+  let defaultModel = 'gemini-2.5-flash';
 
   if (provider === 'groq') {
     providerName = 'Groq Cloud AI';
@@ -31,7 +31,7 @@ export function getAiEngineDetails(config: AiConfig, activeKeyIndex?: number) {
   } else if (provider === 'openrouter') {
     providerName = 'OpenRouter';
     providerShort = 'OpenRouter';
-    defaultModel = 'google/gemini-2.0-flash-001';
+    defaultModel = 'google/gemini-2.5-flash';
   } else if (provider === 'ollama') {
     providerName = 'Ollama Local';
     providerShort = 'Ollama';

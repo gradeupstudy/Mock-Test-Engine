@@ -579,7 +579,7 @@ export const McqInspectionModal: React.FC<McqInspectionModalProps> = ({
             provider: altProvider,
             apiKey: '',
             apiKeysList: [],
-            model: altProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gemini-3.6-flash'
+            model: altProvider === 'groq' ? 'llama-3.3-70b-versatile' : 'gemini-3.7-flash'
           }
         ];
       }

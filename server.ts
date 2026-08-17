@@ -112,7 +112,7 @@ async function callOpenAICompatible(
     defaultModel = "llama-3.3-70b-versatile";
   } else if (provider === "openrouter" || cleanKey.startsWith("sk-or-")) {
     endpoint = "https://openrouter.ai/api/v1/chat/completions";
-    defaultModel = "google/gemini-2.0-flash-001";
+    defaultModel = "google/gemini-2.5-flash";
   }
 
   if (!cleanKey) {
@@ -349,7 +349,7 @@ async function executeSingleTargetServer(
     if (!ai) {
       throw new Error("Google Gemini API Key is missing and process.env.GEMINI_API_KEY is not configured.");
     }
-    const targetModel = modelName && modelName.trim() ? modelName.trim() : "gemini-3.6-flash";
+    const targetModel = modelName && modelName.trim() ? modelName.trim() : "gemini-2.5-flash";
     const response = await ai.models.generateContent({
       model: targetModel,
       contents: prompt,
@@ -406,12 +406,19 @@ function isServerRateLimitError(errText: string): boolean {
     lower.includes('rate limit') ||
     lower.includes('resource_exhausted') ||
     lower.includes('429') ||
+    lower.includes('503') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('overloaded') ||
     lower.includes('too many requests') ||
     lower.includes('limit exceeded') ||
     lower.includes('exceeded your current quota') ||
     lower.includes('per-minute') ||
     lower.includes('per-day') ||
-    lower.includes('free_tier')
+    lower.includes('free_tier') ||
+    lower.includes('decommissioned') ||
+    lower.includes('does not exist') ||
+    lower.includes('not found')
   );
 }
 
@@ -478,17 +485,20 @@ async function executeAiCallServer(
 
     if (keys.length === 0) return;
 
-    let modelsToTry = [m || (p === "gemini" ? "gemini-3.6-flash" : "")];
+    let modelsToTry = [m || (p === "gemini" ? "gemini-2.5-flash" : "")];
     if (p === "gemini") {
-      const primaryM = m && m.trim() ? m.trim() : "gemini-3.6-flash";
+      const primaryM = m && m.trim() ? m.trim() : "gemini-2.5-flash";
       modelsToTry = [primaryM];
+      if (primaryM !== "gemini-2.5-flash") modelsToTry.push("gemini-2.5-flash");
+      if (primaryM !== "gemini-3.7-flash") modelsToTry.push("gemini-3.7-flash");
+      if (primaryM !== "gemini-2.5-pro") modelsToTry.push("gemini-2.5-pro");
       if (primaryM !== "gemini-2.0-flash") modelsToTry.push("gemini-2.0-flash");
-      if (primaryM !== "gemini-2.0-flash-lite") modelsToTry.push("gemini-2.0-flash-lite");
+      if (primaryM !== "gemini-1.5-flash") modelsToTry.push("gemini-1.5-flash");
     } else if (p === "groq") {
       const primaryM = m && m.trim() ? m.trim() : "llama-3.3-70b-versatile";
       modelsToTry = [primaryM];
+      if (primaryM !== "llama-3.3-70b-versatile") modelsToTry.push("llama-3.3-70b-versatile");
       if (primaryM !== "llama-3.1-8b-instant") modelsToTry.push("llama-3.1-8b-instant");
-      if (primaryM !== "mixtral-8x7b-32768") modelsToTry.push("mixtral-8x7b-32768");
       if (primaryM !== "gemma2-9b-it") modelsToTry.push("gemma2-9b-it");
     }
 
@@ -525,18 +535,21 @@ async function executeAiCallServer(
     });
   }
 
-  // 3. Fallback to Gemini Server Key if process.env.GEMINI_API_KEY is configured and not in list
+  // 3. Fallback to Gemini Server Key if process.env.GEMINI_API_KEY is configured
   if (process.env.GEMINI_API_KEY) {
     const hasEnv = targets.some(t => t.provider === "gemini" && (t.apiKey === "" || t.apiKey === process.env.GEMINI_API_KEY));
     if (!hasEnv) {
-      targets.push({
-        provider: "gemini",
-        apiKey: process.env.GEMINI_API_KEY,
-        modelName: "gemini-3.6-flash",
-        label: "GEMINI (Server Default Key)",
-        keyIndex: 0,
-        totalKeys: 1
-      });
+      const serverGeminiModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+      for (const mName of serverGeminiModels) {
+        targets.push({
+          provider: "gemini",
+          apiKey: process.env.GEMINI_API_KEY,
+          modelName: mName,
+          label: `GEMINI (Server Default Key - ${mName})`,
+          keyIndex: 0,
+          totalKeys: 1
+        });
+      }
     }
   }
 

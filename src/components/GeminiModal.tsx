@@ -214,7 +214,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
         return {
           title: 'Google Gemini AI',
           placeholder: 'AIzaSy... (Paste multiple keys separated by lines)',
-          defaultModel: 'gemini-3.6-flash',
+          defaultModel: 'gemini-2.5-flash',
           keyUrl: 'https://aistudio.google.com/app/apikey',
           note: 'Get free Google Gemini API keys from Google AI Studio.'
         };
@@ -238,7 +238,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
         return {
           title: 'OpenRouter / Universal Router',
           placeholder: 'sk-or-v1-... (Paste multiple keys separated by lines)',
-          defaultModel: 'google/gemini-2.0-flash-001',
+          defaultModel: 'google/gemini-2.5-flash',
           keyUrl: 'https://openrouter.ai/keys',
           note: 'Access multiple AI models with unified keys.'
         };

@@ -263,12 +263,19 @@ export function isRateLimitError(errText: string): boolean {
     lower.includes('rate limit') ||
     lower.includes('resource_exhausted') ||
     lower.includes('429') ||
+    lower.includes('503') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('overloaded') ||
     lower.includes('too many requests') ||
     lower.includes('limit exceeded') ||
     lower.includes('exceeded your current quota') ||
     lower.includes('per-minute') ||
     lower.includes('per-day') ||
-    lower.includes('free_tier')
+    lower.includes('free_tier') ||
+    lower.includes('decommissioned') ||
+    lower.includes('does not exist') ||
+    lower.includes('not found')
   );
 }
 
@@ -313,8 +320,8 @@ async function directClientSingleCall(
       throw new Error('Gemini API Key is missing.');
     }
 
-    const rawModel = modelName || 'gemini-3.6-flash';
-    const model = rawModel && rawModel.trim() ? rawModel.trim() : 'gemini-3.6-flash';
+    const rawModel = modelName || 'gemini-2.5-flash';
+    const model = rawModel && rawModel.trim() ? rawModel.trim() : 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
 
     let res: Response;
@@ -428,7 +435,7 @@ async function directClientSingleCall(
       defaultModel = 'llama-3.3-70b-versatile';
     } else if (provider === 'openrouter') {
       endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-      defaultModel = 'google/gemini-2.0-flash-001';
+      defaultModel = 'google/gemini-2.5-flash';
     }
 
     if (baseUrl) {
@@ -532,17 +539,20 @@ export async function directClientAiCall(
     if (keys.length === 0) return;
     const pointer = clientKeyPointerMap[p] || 0;
 
-    let modelsToTry = [m || (p === 'gemini' ? 'gemini-3.6-flash' : '')];
+    let modelsToTry = [m || (p === 'gemini' ? 'gemini-2.5-flash' : '')];
     if (p === 'gemini') {
-      const primaryM = m && m.trim() ? m.trim() : 'gemini-3.6-flash';
+      const primaryM = m && m.trim() ? m.trim() : 'gemini-2.5-flash';
       modelsToTry = [primaryM];
+      if (primaryM !== 'gemini-2.5-flash') modelsToTry.push('gemini-2.5-flash');
+      if (primaryM !== 'gemini-3.7-flash') modelsToTry.push('gemini-3.7-flash');
+      if (primaryM !== 'gemini-2.5-pro') modelsToTry.push('gemini-2.5-pro');
       if (primaryM !== 'gemini-2.0-flash') modelsToTry.push('gemini-2.0-flash');
-      if (primaryM !== 'gemini-2.0-flash-lite') modelsToTry.push('gemini-2.0-flash-lite');
+      if (primaryM !== 'gemini-1.5-flash') modelsToTry.push('gemini-1.5-flash');
     } else if (p === 'groq') {
       const primaryM = m && m.trim() ? m.trim() : 'llama-3.3-70b-versatile';
       modelsToTry = [primaryM];
+      if (primaryM !== 'llama-3.3-70b-versatile') modelsToTry.push('llama-3.3-70b-versatile');
       if (primaryM !== 'llama-3.1-8b-instant') modelsToTry.push('llama-3.1-8b-instant');
-      if (primaryM !== 'mixtral-8x7b-32768') modelsToTry.push('mixtral-8x7b-32768');
       if (primaryM !== 'gemma2-9b-it') modelsToTry.push('gemma2-9b-it');
     }
 
