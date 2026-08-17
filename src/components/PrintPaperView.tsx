@@ -1182,7 +1182,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                     </div>
 
                     {/* A4 Sheet Container */}
-                    <div className="w-full bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 relative min-h-[960px] font-sans flex flex-col justify-between border border-slate-300">
+                    <div className="w-full max-w-[794px] bg-white text-black shadow-2xl rounded-sm p-5 lg:p-6 relative min-h-[1050px] font-sans flex flex-col justify-between border border-slate-300 overflow-hidden">
                       {/* Diagonal Watermark Overlay */}
                       {showWatermark && watermarkText && (
                         <div
@@ -1190,7 +1190,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                           style={{ zIndex: 0 }}
                         >
                           <span
-                            className="text-6xl font-extrabold uppercase tracking-widest text-slate-900 transform -rotate-35 whitespace-nowrap"
+                            className="text-5xl lg:text-6xl font-extrabold uppercase tracking-widest text-slate-900 transform -rotate-35 whitespace-nowrap"
                             style={{ opacity: watermarkOpacity }}
                           >
                             {watermarkText}
@@ -1203,20 +1203,20 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                         {page.isFirstPage ? (
                           <div>
                             {/* Top Exam Header */}
-                            <div className="text-center mb-3">
+                            <div className="text-center mb-2">
                               {activeLogoDataUrl && (
-                                <div className="flex justify-center mb-1.5">
+                                <div className="flex justify-center mb-1">
                                   <img
                                     src={activeLogoDataUrl}
                                     alt="Logo"
-                                    className="h-14 w-auto object-contain"
+                                    className="h-10 lg:h-12 w-auto object-contain"
                                   />
                                 </div>
                               )}
-                              <h1 className="text-lg font-extrabold text-black uppercase tracking-tight m-0">
+                              <h1 className="text-base lg:text-lg font-extrabold text-black uppercase tracking-tight m-0">
                                 {testTitle}
                               </h1>
-                              <div className="text-xs font-bold text-black mt-1 pb-2 border-b-[1.5px] border-black flex items-center justify-center gap-3">
+                              <div className="text-[11px] font-bold text-black mt-1 pb-1.5 border-b-[1.5px] border-black flex items-center justify-center gap-3">
                                 <span>Time Allowed: {duration} Mins</span>
                                 <span>|</span>
                                 <span>Max Marks: {totalMarks}</span>
@@ -1231,14 +1231,14 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
                             {/* General Instructions Box */}
                             {instructions && (
-                              <div className="border border-slate-400 rounded-sm p-2 mb-3 text-[10px] leading-relaxed text-black bg-white">
+                              <div className="border border-slate-400 rounded-sm p-1.5 mb-2 text-[9.5px] leading-snug text-black bg-white">
                                 <strong className="block mb-0.5 text-black">General Instructions:</strong>
                                 <div className="whitespace-pre-line">{instructions}</div>
                               </div>
                             )}
                           </div>
                         ) : (
-                          <div className="mb-3 pb-1.5 border-b-[1.5px] border-black flex items-center justify-between text-xs font-bold text-black">
+                          <div className="mb-2 pb-1.5 border-b-[1.5px] border-black flex items-center justify-between text-xs font-bold text-black">
                             <span>{testTitle}</span>
                             <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded font-mono">
                               PAGE {page.pageNumber} OF {page.totalPages}
@@ -1248,9 +1248,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       </div>
 
                       {/* 2-Column Boxed Questions Grid with Full Outer Border and Center Line */}
-                      <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-2">
+                      <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-1 overflow-hidden">
                         {/* Left Column */}
-                        <div className="p-2.5 border-r-[1.5px] border-black flex flex-col justify-between h-full space-y-1">
+                        <div className="p-2 border-r-[1.5px] border-black flex flex-col justify-between h-full space-y-0.5 overflow-hidden">
                           {page.col1.map((item) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
@@ -1295,7 +1295,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 </div>
 
                                 {shouldDisplayTranslation(q.question, q.translation) && (
-                                  <div className="text-slate-800 text-[10.5px]">
+                                  <div className="text-slate-800 text-[10px]">
                                     {isLiveEditMode ? (
                                       <span
                                         contentEditable
@@ -1312,14 +1312,14 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 )}
 
                                 {isShort ? (
-                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
+                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black pt-0.5">
                                     <div>{optA}</div>
                                     <div>{optB}</div>
                                     <div>{optC}</div>
                                     <div>{optD}</div>
                                   </div>
                                 ) : (
-                                  <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
+                                  <div className="flex flex-col gap-0.5 text-[10px] text-black pt-0.5">
                                     <div>{optA}</div>
                                     <div>{optB}</div>
                                     <div>{optC}</div>
@@ -1332,7 +1332,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                         </div>
 
                         {/* Right Column */}
-                        <div className="p-2.5 flex flex-col justify-between h-full space-y-1">
+                        <div className="p-2 flex flex-col justify-between h-full space-y-0.5 overflow-hidden">
                           {page.col2.map((item) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
@@ -1377,7 +1377,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 </div>
 
                                 {shouldDisplayTranslation(q.question, q.translation) && (
-                                  <div className="text-slate-800 text-[10.5px]">
+                                  <div className="text-slate-800 text-[10px]">
                                     {isLiveEditMode ? (
                                       <span
                                         contentEditable
@@ -1394,14 +1394,14 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 )}
 
                                 {isShort ? (
-                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
+                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black pt-0.5">
                                     <div>{optA}</div>
                                     <div>{optB}</div>
                                     <div>{optC}</div>
                                     <div>{optD}</div>
                                   </div>
                                 ) : (
-                                  <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
+                                  <div className="flex flex-col gap-0.5 text-[10px] text-black pt-0.5">
                                     <div>{optA}</div>
                                     <div>{optB}</div>
                                     <div>{optC}</div>
@@ -1415,10 +1415,10 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       </div>
 
                       {/* Footer Section with Page Number */}
-                      <div className="relative z-10 mt-2 pt-2 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-700 font-bold">
+                      <div className="relative z-10 mt-1 pt-1.5 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-700 font-bold">
                         <span>Gradeup Study Official Test Series</span>
                         <span className="bg-slate-100 text-slate-900 px-2 py-0.5 rounded font-mono border border-slate-300">
-                          Page {page.pageNumber} of {page.totalPages}
+                          PAGE {page.pageNumber} OF {page.totalPages}
                         </span>
                       </div>
                     </div>

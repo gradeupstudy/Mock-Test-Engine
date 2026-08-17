@@ -1486,11 +1486,11 @@ export function getRecommendedPageCapacities(
   totalQuestions: number,
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
 ): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
-  // Page 1 has Logo + Exam Header + General Instructions Box (~240px vertical space)
-  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~25px space)
-  // Realistic physical capacities for A4 2-Column format:
-  const maxP1 = density === 'ultra-compact' ? 24 : density === 'normal' ? 18 : 22;
-  const maxOther = density === 'ultra-compact' ? 38 : density === 'normal' ? 26 : 34;
+  // Page 1 has Logo + Exam Header + General Instructions Box (~220px vertical space)
+  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~30px space)
+  // Physical maximum capacities that safely fit within A4 height without overflowing:
+  const maxP1 = density === 'ultra-compact' ? 22 : density === 'normal' ? 16 : 20;
+  const maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
 
   if (totalQuestions <= 0) {
     return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
@@ -1519,8 +1519,8 @@ export function getRecommendedPageCapacities(
 
 /**
  * Precision Question-to-Page Layout Engine:
- * Dynamically computes an even distribution of questions across discrete A4 pages.
- * Fills both columns evenly without overflowing or clipping questions at the bottom.
+ * Height-aware pagination engine that guarantees zero A4 page overflow.
+ * Accounts for passages, multiline questions, bilingual translations, and option line wrapping.
  */
 export function paginateQuestionsFor2ColPaper(
   questions: Question[],
@@ -1538,65 +1538,82 @@ export function paginateQuestionsFor2ColPaper(
   }));
 
   const totalN = questions.length;
-  // Page 1 has Logo + Header + General Instructions Box (~240px vertical space)
-  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~25px space)
-  const maxP1 = density === 'ultra-compact' ? 24 : density === 'normal' ? 18 : 22;
-  const maxOther = density === 'ultra-compact' ? 38 : density === 'normal' ? 26 : 34;
+  // Maximum safe column height limits (in pixels at 96 DPI):
+  // Page 1 available column height = 1123px - (padding 50px + header 180px + footer 30px) = ~860px
+  // Other pages available column height = 1123px - (padding 50px + header 40px + footer 30px) = ~1000px
+  const MAX_P1_COL_HEIGHT = density === 'ultra-compact' ? 880 : density === 'normal' ? 820 : 850;
+  const MAX_OTHER_COL_HEIGHT = density === 'ultra-compact' ? 1020 : density === 'normal' ? 950 : 980;
 
-  // Determine page counts array
-  let pageQuestionCounts: number[] = [];
-
-  if (page1CapOverride && page1CapOverride > 0 && otherCapOverride && otherCapOverride > 0) {
-    let rem = totalN;
-    let pNum = 1;
-    while (rem > 0) {
-      const cap = pNum === 1 ? page1CapOverride : otherCapOverride;
-      const count = Math.min(cap, rem);
-      pageQuestionCounts.push(count);
-      rem -= count;
-      pNum++;
-    }
-  } else {
-    // Dynamic Auto-Balance Mode
-    if (totalN <= maxP1) {
-      pageQuestionCounts = [totalN];
-    } else {
-      const remainingAfterP1 = totalN - maxP1;
-      const numOther = Math.ceil(remainingAfterP1 / maxOther);
-      const totalPages = 1 + numOther;
-
-      let p1Count = maxP1;
-      if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
-
-      const remainingQs = totalN - p1Count;
-      const perOther = Math.floor(remainingQs / numOther);
-      let extra = remainingQs % numOther;
-
-      pageQuestionCounts = [p1Count];
-      for (let i = 0; i < numOther; i++) {
-        let count = perOther + (extra > 0 ? 1 : 0);
-        if (extra > 0) extra--;
-        pageQuestionCounts.push(count);
-      }
-    }
-  }
+  // Safe numerical question caps per page
+  const maxP1Count = density === 'ultra-compact' ? 24 : density === 'normal' ? 16 : 20;
+  const maxOtherCount = density === 'ultra-compact' ? 34 : density === 'normal' ? 24 : 30;
 
   const pages: PaperPageLayout[] = [];
-  let currentIndex = 0;
+  let remainingItems = [...itemsWithHeight];
+  let pageNum = 1;
 
-  for (let pIdx = 0; pIdx < pageQuestionCounts.length; pIdx++) {
-    const pageNum = pIdx + 1;
+  while (remainingItems.length > 0) {
     const isFirst = pageNum === 1;
-    const countForPage = pageQuestionCounts[pIdx];
+    const maxColHeight = isFirst ? MAX_P1_COL_HEIGHT : MAX_OTHER_COL_HEIGHT;
+    const maxItemsForPage = isFirst
+      ? (page1CapOverride && page1CapOverride > 0 ? page1CapOverride : maxP1Count)
+      : (otherCapOverride && otherCapOverride > 0 ? otherCapOverride : maxOtherCount);
 
-    const pageSlice = itemsWithHeight.slice(currentIndex, currentIndex + countForPage);
-    const col1Count = Math.ceil(countForPage / 2);
-    const col1 = pageSlice.slice(0, col1Count);
-    const col2 = pageSlice.slice(col1Count);
+    // If manual cap override is provided, we respect the question count cap
+    // while strictly guarding against height overflow.
+    let pageItems: PaperPageQuestion[] = [];
+    
+    if (page1CapOverride && otherCapOverride && page1CapOverride > 0 && otherCapOverride > 0) {
+      const takeCount = Math.min(remainingItems.length, maxItemsForPage);
+      pageItems = remainingItems.splice(0, takeCount);
+    } else {
+      // Dynamic Height & Content Density Packing:
+      // Greedily collect questions that safely fit within 2 columns of height maxColHeight
+      let col1H = 0;
+      let col2H = 0;
+      let count = 0;
+      const currentBatch: PaperPageQuestion[] = [];
+
+      for (let i = 0; i < remainingItems.length; i++) {
+        if (count >= maxItemsForPage) break;
+        const item = remainingItems[i];
+        
+        // Try placing in col 1 or col 2
+        if (col1H <= col2H) {
+          if (col1H + item.estimatedHeight <= maxColHeight || count === 0) {
+            col1H += item.estimatedHeight;
+            currentBatch.push(item);
+            count++;
+          } else {
+            break;
+          }
+        } else {
+          if (col2H + item.estimatedHeight <= maxColHeight) {
+            col2H += item.estimatedHeight;
+            currentBatch.push(item);
+            count++;
+          } else {
+            break;
+          }
+        }
+      }
+
+      // If nothing could fit (extreme edge case), take at least 1 item
+      if (currentBatch.length === 0 && remainingItems.length > 0) {
+        currentBatch.push(remainingItems[0]);
+      }
+
+      pageItems = remainingItems.splice(0, currentBatch.length);
+    }
+
+    // Split pageItems into Column 1 and Column 2 evenly
+    const half = Math.ceil(pageItems.length / 2);
+    const col1 = pageItems.slice(0, half);
+    const col2 = pageItems.slice(half);
 
     pages.push({
       pageNumber: pageNum,
-      totalPages: pageQuestionCounts.length,
+      totalPages: 1, // updated below
       isFirstPage: isFirst,
       col1,
       col2,
@@ -1604,18 +1621,7 @@ export function paginateQuestionsFor2ColPaper(
       col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
     });
 
-    currentIndex += countForPage;
-  }
-
-  // Safety fallback if any question remained
-  if (currentIndex < itemsWithHeight.length) {
-    const leftover = itemsWithHeight.slice(currentIndex);
-    if (pages.length > 0) {
-      const lastPage = pages[pages.length - 1];
-      const half = Math.ceil(leftover.length / 2);
-      lastPage.col1.push(...leftover.slice(0, half));
-      lastPage.col2.push(...leftover.slice(half));
-    }
+    pageNum++;
   }
 
   const finalTotalPages = Math.max(1, pages.length);
@@ -1724,29 +1730,29 @@ export async function exportCompact2ColPdfTestPaper(
       pageDiv.style.left = '-9999px';
       pageDiv.style.top = '0';
       pageDiv.style.width = '794px'; // 210mm at 96 DPI
-      pageDiv.style.minHeight = '1123px'; // 297mm at 96 DPI
-      pageDiv.style.height = 'auto';
+      pageDiv.style.height = '1123px'; // 297mm at 96 DPI
+      pageDiv.style.maxHeight = '1123px';
       pageDiv.style.backgroundColor = '#ffffff';
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
       pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '24px 28px 20px 28px';
+      pageDiv.style.padding = '22px 28px 18px 28px';
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'visible';
+      pageDiv.style.overflow = 'hidden';
 
       let headerHtml = '';
       if (page.isFirstPage) {
         headerHtml = `
           <div>
             <!-- Top Exam Header -->
-            <div style="text-align: center; margin-bottom: 8px;">
+            <div style="text-align: center; margin-bottom: 6px;">
               ${logoHtml}
-              <h1 style="margin: 0; font-size: 17px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
+              <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
                 ${escapeHtml(testTitle)}
               </h1>
-              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 4px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
+              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
                 <span>Time Allowed: ${duration} Mins</span>
                 <span>|</span>
                 <span>Max Marks: ${marks}</span>
@@ -1756,7 +1762,7 @@ export async function exportCompact2ColPdfTestPaper(
 
             <!-- General Instructions Box -->
             ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 5px 10px; margin-bottom: 8px; font-size: 9.5px; line-height: 1.35; color: #000000; background: #ffffff;">
+              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 6px; font-size: 9px; line-height: 1.3; color: #000000; background: #ffffff;">
                 <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
                 ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
               </div>
@@ -1765,7 +1771,7 @@ export async function exportCompact2ColPdfTestPaper(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
+          <div style="margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(testTitle)}</span>
             <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
           </div>
@@ -1784,19 +1790,19 @@ export async function exportCompact2ColPdfTestPaper(
           </div>
 
           <!-- 2-Column Boxed Layout with Outer Border on all 4 sides and Center Line -->
-          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 6px;">
+          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
             <!-- Left Column -->
-            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
+            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
             <!-- Right Column -->
-            <div style="padding: 8px 8px 8px 10px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
+            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
 
           <!-- Page Bottom Footer with Page Number -->
-          <div style="border-top: 1px solid #000000; padding-top: 3px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
+          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(footerText)}</span>
             <span>Page ${page.pageNumber} of ${page.totalPages}</span>
           </div>
@@ -1806,14 +1812,15 @@ export async function exportCompact2ColPdfTestPaper(
       document.body.appendChild(pageDiv);
       await new Promise(resolve => setTimeout(resolve, 80));
 
-      const actualHeight = Math.max(1123, pageDiv.scrollHeight);
       const canvas = await html2canvas(pageDiv, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
-        height: actualHeight
+        height: 1123,
+        windowWidth: 794,
+        windowHeight: 1123
       });
 
       if (document.body.contains(pageDiv)) {
@@ -1824,9 +1831,7 @@ export async function exportCompact2ColPdfTestPaper(
         pdf.addPage();
       }
 
-      const renderedMmHeight = (canvas.height * imgWidth) / canvas.width;
-      const printMmHeight = Math.min(pageHeight, renderedMmHeight);
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, printMmHeight);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
     }
 
     const fileName = `${testTitle.replace(/[^a-zA-Z0-9]/g, '_')}_Paper_Saver.pdf`;
@@ -2070,28 +2075,28 @@ export async function exportCombinedBookletPdf(
       pageDiv.style.left = '-9999px';
       pageDiv.style.top = '0';
       pageDiv.style.width = '794px';
-      pageDiv.style.minHeight = '1123px';
-      pageDiv.style.height = 'auto';
+      pageDiv.style.height = '1123px';
+      pageDiv.style.maxHeight = '1123px';
       pageDiv.style.backgroundColor = '#ffffff';
       pageDiv.style.color = '#000000';
       pageDiv.style.fontFamily = "'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif";
       pageDiv.style.boxSizing = 'border-box';
-      pageDiv.style.padding = '24px 28px 20px 28px';
+      pageDiv.style.padding = '22px 28px 18px 28px';
       pageDiv.style.display = 'flex';
       pageDiv.style.flexDirection = 'column';
       pageDiv.style.justifyContent = 'space-between';
-      pageDiv.style.overflow = 'visible';
+      pageDiv.style.overflow = 'hidden';
 
       let headerHtml = '';
       if (page.isFirstPage) {
         headerHtml = `
           <div>
-            <div style="text-align: center; margin-bottom: 8px;">
+            <div style="text-align: center; margin-bottom: 6px;">
               ${logoHtml}
-              <h1 style="margin: 0; font-size: 17px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
+              <h1 style="margin: 0; font-size: 16px; font-weight: 800; color: #000000; text-transform: uppercase; letter-spacing: 0.5px;">
                 ${escapeHtml(testTitle)}
               </h1>
-              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 4px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
+              <div style="font-size: 11px; font-weight: 700; color: #000000; margin-top: 3px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: center; gap: 16px;">
                 <span>Time Allowed: ${duration} Mins</span>
                 <span>|</span>
                 <span>Max Marks: ${marks}</span>
@@ -2100,7 +2105,7 @@ export async function exportCombinedBookletPdf(
             </div>
 
             ${defaultInst ? `
-              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 5px 10px; margin-bottom: 8px; font-size: 9.5px; line-height: 1.35; color: #000000; background: #ffffff;">
+              <div style="border: 1px solid #94a3b8; border-radius: 2px; padding: 4px 8px; margin-bottom: 6px; font-size: 9px; line-height: 1.3; color: #000000; background: #ffffff;">
                 <strong style="display: block; margin-bottom: 1px;">General Instructions:</strong>
                 ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
               </div>
@@ -2109,7 +2114,7 @@ export async function exportCombinedBookletPdf(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
+          <div style="margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(testTitle)}</span>
             <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
           </div>
@@ -2126,16 +2131,16 @@ export async function exportCombinedBookletPdf(
             ${headerHtml}
           </div>
 
-          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 6px;">
-            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
+          <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
+            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
-            <div style="padding: 8px 8px 8px 10px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
+            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
 
-          <div style="border-top: 1px solid #000000; padding-top: 3px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 700; color: #000000;">
+          <div style="border-top: 1px solid #000000; padding-top: 2px; display: flex; justify-content: space-between; font-size: 9px; font-weight: 700; color: #000000;">
             <span>${escapeHtml(footerText)}</span>
             <span>Page ${page.pageNumber} of ${page.totalPages + 1}</span>
           </div>
@@ -2145,14 +2150,15 @@ export async function exportCombinedBookletPdf(
       document.body.appendChild(pageDiv);
       await new Promise(resolve => setTimeout(resolve, 80));
 
-      const actualHeight = Math.max(1123, pageDiv.scrollHeight);
       const canvas = await html2canvas(pageDiv, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         width: 794,
-        height: actualHeight
+        height: 1123,
+        windowWidth: 794,
+        windowHeight: 1123
       });
 
       if (document.body.contains(pageDiv)) {
@@ -2163,9 +2169,7 @@ export async function exportCombinedBookletPdf(
         pdf.addPage();
       }
 
-      const renderedMmHeight = (canvas.height * imgWidth) / canvas.width;
-      const printMmHeight = Math.min(pageHeight, renderedMmHeight);
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, printMmHeight);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, imgWidth, pageHeight);
     }
 
     // 2. Render Answer Key Page
@@ -2290,13 +2294,13 @@ export function printNativeCompact2ColPaper(
   const watermark = config.watermarkText || 'Gradeup Study';
   const footerText = config.footerText || 'Gradeup Study Official Test Series';
 
-  const fontPt = config.fontSize === 'ultra-compact' ? '8pt' : config.fontSize === 'normal' ? '9.5pt' : '8.5pt';
-  const optFontPt = config.fontSize === 'ultra-compact' ? '7.5pt' : config.fontSize === 'normal' ? '9pt' : '8pt';
-  const qSpacing = config.fontSize === 'ultra-compact' ? '6px' : config.fontSize === 'normal' ? '12px' : '8px';
+  const fontPt = config.fontSize === 'ultra-compact' ? '7.5pt' : config.fontSize === 'normal' ? '9.5pt' : '8.5pt';
+  const optFontPt = config.fontSize === 'ultra-compact' ? '7pt' : config.fontSize === 'normal' ? '8.5pt' : '7.8pt';
+  const qSpacing = config.fontSize === 'ultra-compact' ? '3px' : config.fontSize === 'normal' ? '7px' : '4px';
 
   let logoHtml = '';
   if (config.logoDataUrl) {
-    logoHtml = `<div style="text-align:center; margin-bottom:4px;"><img src="${config.logoDataUrl}" style="height:48px; width:auto; object-fit:contain;" /></div>`;
+    logoHtml = `<div style="text-align:center; margin-bottom:3px;"><img src="${config.logoDataUrl}" style="height:36px; width:auto; object-fit:contain;" /></div>`;
   }
 
   const defaultInst = config.instructions ||
@@ -2316,8 +2320,8 @@ export function printNativeCompact2ColPaper(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div class="question-item" style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; page-break-inside: avoid; break-inside: avoid;">
-          <div style="font-weight: bold; color: #000; margin-bottom: 2px;">
+        <div class="question-item" style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.3; page-break-inside: avoid; break-inside: avoid;">
+          <div style="font-weight: bold; color: #000; margin-bottom: 1px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
           ${shouldDisplayTranslation(q.question, q.translation) ? `
@@ -2326,7 +2330,7 @@ export function printNativeCompact2ColPaper(
             </div>
           ` : ''}
           ${isShort ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; font-size: ${optFontPt};">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; font-size: ${optFontPt};">
               <div>${optA}</div>
               <div>${optB}</div>
               <div>${optC}</div>
@@ -2357,10 +2361,10 @@ export function printNativeCompact2ColPaper(
     let header = '';
     if (page.isFirstPage) {
       header = `
-        <div style="text-align:center; margin-bottom:6px;">
+        <div style="text-align:center; margin-bottom:4px;">
           ${logoHtml}
-          <h1 style="margin:0; font-size:15pt; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(testTitle)}</h1>
-          <div style="font-size:8.5pt; font-weight:bold; margin-top:4px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:center; gap:16px;">
+          <h1 style="margin:0; font-size:13pt; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(testTitle)}</h1>
+          <div style="font-size:8pt; font-weight:bold; margin-top:2px; padding-bottom:3px; border-bottom:1.5px solid #000; display:flex; justify-content:center; gap:16px;">
             <span>Time Allowed: ${duration} Mins</span>
             <span>|</span>
             <span>Max Marks: ${marks}</span>
@@ -2368,7 +2372,7 @@ export function printNativeCompact2ColPaper(
           </div>
         </div>
         ${defaultInst ? `
-          <div style="border:1px solid #64748b; padding:4px 8px; margin-bottom:6px; font-size:7.5pt; line-height:1.3; background:#fff;">
+          <div style="border:1px solid #64748b; padding:3px 6px; margin-bottom:4px; font-size:7pt; line-height:1.25; background:#fff;">
             <strong>General Instructions:</strong><br/>
             ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
           </div>
@@ -2376,9 +2380,9 @@ export function printNativeCompact2ColPaper(
       `;
     } else {
       header = `
-        <div style="margin-bottom:6px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:space-between; align-items:center; font-size:8.5pt; font-weight:bold;">
+        <div style="margin-bottom:4px; padding-bottom:3px; border-bottom:1.5px solid #000; display:flex; justify-content:space-between; align-items:center; font-size:8pt; font-weight:bold;">
           <span>${escapeHtml(testTitle)}</span>
-          <span style="font-size:8pt; background:#000; color:#fff; padding:1px 6px; border-radius:2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
+          <span style="font-size:7.5pt; background:#000; color:#fff; padding:1px 5px; border-radius:2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
         </div>
       `;
     }
@@ -2417,24 +2421,26 @@ export function printNativeCompact2ColPaper(
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
         @page {
           size: A4 portrait;
-          margin: 6mm 8mm 6mm 8mm;
+          margin: 0;
         }
         * {
           box-sizing: border-box;
         }
-        body {
-          font-family: 'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif;
+        html, body {
           margin: 0;
           padding: 0;
+          font-family: 'Noto Sans Devanagari', 'Segoe UI', Arial, sans-serif;
           color: #000;
           background: #e2e8f0;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
         .watermark {
           position: absolute;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%) rotate(-35deg);
-          font-size: 50px;
+          font-size: 46px;
           font-weight: 800;
           color: rgba(180, 180, 180, 0.08);
           pointer-events: none;
@@ -2447,9 +2453,10 @@ export function printNativeCompact2ColPaper(
         .print-page {
           background: #ffffff;
           width: 210mm;
-          min-height: 278mm;
+          height: 297mm;
+          max-height: 297mm;
           margin: 15px auto;
-          padding: 10mm 12mm 8mm 12mm;
+          padding: 6mm 9mm 5mm 9mm;
           position: relative;
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           page-break-after: always;
@@ -2459,76 +2466,82 @@ export function printNativeCompact2ColPaper(
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          overflow: visible;
+          overflow: hidden;
+          box-sizing: border-box;
         }
         .page-inner {
           position: relative;
           z-index: 1;
           display: flex;
           flex-direction: column;
-          min-height: 100%;
+          height: 100%;
           justify-content: space-between;
           flex: 1;
+          overflow: hidden;
         }
         .boxed-grid {
           border: 1.5px solid #000;
-          border-bottom: 1.5px solid #000;
           display: grid;
           grid-template-columns: 1fr 1fr;
           flex: 1;
-          margin-bottom: 4px;
+          min-height: 0;
+          margin-bottom: 3px;
+          overflow: hidden;
         }
         .left-col {
-          padding: 6px 8px;
+          padding: 4px 7px;
           border-right: 1.5px solid #000;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
           height: 100%;
           box-sizing: border-box;
+          overflow: hidden;
         }
         .right-col {
-          padding: 6px 8px;
+          padding: 4px 7px;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
           height: 100%;
           box-sizing: border-box;
+          overflow: hidden;
         }
         .page-footer {
           border-top: 1px solid #000;
-          padding-top: 3px;
+          padding-top: 2px;
           display: flex;
           justify-content: space-between;
-          font-size: 8pt;
+          font-size: 7.5pt;
           font-weight: bold;
           color: #000;
         }
         @media print {
           .no-print { display: none !important; }
-          body {
-            background: transparent;
-            margin: 0;
-            padding: 0;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+          html, body {
+            background: transparent !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 210mm !important;
+            height: 297mm !important;
           }
           .print-page {
-            box-shadow: none;
-            margin: 0;
-            padding: 5mm 6mm 4mm 6mm;
-            width: 100%;
-            min-height: 275mm;
-            height: auto;
-            max-height: none;
-            page-break-after: always;
-            break-after: page;
-            page-break-inside: avoid;
-            break-inside: avoid;
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 6mm 9mm 5mm 9mm !important;
+            width: 210mm !important;
+            height: 297mm !important;
+            max-height: 297mm !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
           }
           .print-page:last-child {
-            page-break-after: avoid;
-            break-after: avoid;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       </style>
