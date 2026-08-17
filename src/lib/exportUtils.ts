@@ -1194,6 +1194,7 @@ export interface BookletCustomConfig {
   showBoxBorder?: boolean;
   page1Capacity?: number;
   otherPageCapacity?: number;
+  autoBalance?: boolean;
   footerText?: string;
 }
 
@@ -1211,36 +1212,85 @@ export interface PaperPageLayout {
 }
 
 /**
+ * Calculates optimal capacity recommendations for A4 paper.
+ * Eliminates orphan bottom whitespace and avoids unnecessary extra pages.
+ */
+export function getRecommendedPageCapacities(
+  totalQuestions: number,
+  density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
+): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
+  // Base realistic max capacities
+  let maxP1 = 20;
+  let maxOther = 26;
+
+  if (density === 'ultra-compact') {
+    maxP1 = 24;
+    maxOther = 30;
+  } else if (density === 'normal') {
+    maxP1 = 16;
+    maxOther = 20;
+  }
+
+  if (totalQuestions <= 0) {
+    return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
+  }
+
+  if (totalQuestions <= maxP1) {
+    return { p1Capacity: totalQuestions, otherCapacity: maxOther, estimatedPages: 1 };
+  }
+
+  // Calculate minimum pages needed
+  const remainingAfterP1 = totalQuestions - maxP1;
+  const numOtherPages = Math.ceil(remainingAfterP1 / maxOther);
+  const totalPages = 1 + numOtherPages;
+
+  // Proportional balanced distribution for 2 pages
+  // Page 1 has ~45% usable height of total 2 pages (due to top header & instructions)
+  if (totalPages === 2) {
+    let p1 = Math.min(maxP1, Math.round(totalQuestions * 0.46));
+    if (p1 % 2 !== 0 && p1 + 1 <= maxP1) {
+      p1 += 1; // Make even for equal 2 columns
+    }
+    const other = totalQuestions - p1;
+    return { p1Capacity: p1, otherCapacity: other, estimatedPages: 2 };
+  }
+
+  // For 3+ pages
+  const p1 = maxP1;
+  const otherPagesRemaining = totalQuestions - p1;
+  const perOtherPage = Math.ceil(otherPagesRemaining / numOtherPages);
+  return { p1Capacity: p1, otherCapacity: perOtherPage, estimatedPages: totalPages };
+}
+
+/**
  * Smart Question-to-Page Distributor:
- * Calculates discrete A4 pages such that Left Column fills first, then Right Column,
- * and then gracefully flows to the next page.
- * Every page gets a closed 4-sided outer outline with bottom border and page numbers!
+ * Calculates discrete A4 pages such that questions fill both columns evenly
+ * without leaving large blank spaces at the bottom of pages.
  */
 export function paginateQuestionsFor2ColPaper(
   questions: Question[],
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact',
   page1CapOverride?: number,
-  otherCapOverride?: number
+  otherCapOverride?: number,
+  autoBalance: boolean = true
 ): PaperPageLayout[] {
   if (!questions || questions.length === 0) return [];
 
-  // Default capacities per page (Total questions = Col 1 + Col 2)
-  let p1Total = 12;   // 6 in col 1, 6 in col 2 (leaving room for header + instructions)
-  let otherTotal = 16; // 8 in col 1, 8 in col 2
+  let p1Total: number;
+  let otherTotal: number;
 
-  if (density === 'ultra-compact') {
-    p1Total = 14;   // 7 + 7
-    otherTotal = 18; // 9 + 9
-  } else if (density === 'normal') {
-    p1Total = 10;   // 5 + 5
-    otherTotal = 14; // 7 + 7
-  }
-
-  if (page1CapOverride && page1CapOverride > 0) {
+  if (page1CapOverride && page1CapOverride > 0 && otherCapOverride && otherCapOverride > 0) {
     p1Total = page1CapOverride;
-  }
-  if (otherCapOverride && otherCapOverride > 0) {
     otherTotal = otherCapOverride;
+  } else if (autoBalance) {
+    const rec = getRecommendedPageCapacities(questions.length, density);
+    p1Total = page1CapOverride && page1CapOverride > 0 ? page1CapOverride : rec.p1Capacity;
+    otherTotal = otherCapOverride && otherCapOverride > 0 ? otherCapOverride : rec.otherCapacity;
+  } else {
+    p1Total = density === 'ultra-compact' ? 24 : density === 'normal' ? 16 : 20;
+    otherTotal = density === 'ultra-compact' ? 30 : density === 'normal' ? 20 : 26;
+    if (page1CapOverride && page1CapOverride > 0) p1Total = page1CapOverride;
+    if (otherCapOverride && otherCapOverride > 0) otherTotal = otherCapOverride;
   }
 
   const pages: PaperPageLayout[] = [];
@@ -1372,7 +1422,8 @@ export async function exportCompact2ColPdfTestPaper(
     questions,
     config.fontSize || 'compact',
     config.page1Capacity,
-    config.otherPageCapacity
+    config.otherPageCapacity,
+    config.autoBalance !== false
   );
 
   const pdf = new jsPDF('p', 'mm', 'a4');
@@ -1712,7 +1763,8 @@ export async function exportCombinedBookletPdf(
     questions,
     config.fontSize || 'compact',
     config.page1Capacity,
-    config.otherPageCapacity
+    config.otherPageCapacity,
+    config.autoBalance !== false
   );
 
   const pdf = new jsPDF('p', 'mm', 'a4');
@@ -2003,7 +2055,8 @@ export function printNativeCompact2ColPaper(
     questions,
     config.fontSize || 'compact',
     config.page1Capacity,
-    config.otherPageCapacity
+    config.otherPageCapacity,
+    config.autoBalance !== false
   );
 
   const pagesHtml = pages.map(page => {

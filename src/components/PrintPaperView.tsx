@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Question, MockHistory } from '../types';
 import {
   exportCompact2ColPdfTestPaper,
@@ -6,13 +6,14 @@ import {
   exportCombinedBookletPdf,
   printNativeCompact2ColPaper,
   printNativeCompactAnswerKey,
-  exportDocxTestPaper,
-  exportDocxAnswerKey,
   BookletCustomConfig,
   formatMathSymbols,
-  shouldDisplayTranslation
+  shouldDisplayTranslation,
+  paginateQuestionsFor2ColPaper,
+  getRecommendedPageCapacities,
+  PaperPageLayout
 } from '../lib/exportUtils';
-import { PRESET_LOGOS, PresetLogo } from '../lib/paperLogos';
+import { PRESET_LOGOS } from '../lib/paperLogos';
 import {
   Printer,
   FileDown,
@@ -28,14 +29,18 @@ import {
   Eye,
   Sliders,
   Type,
-  Minimize2,
-  Maximize2,
   RefreshCw,
   Info,
   Check,
   ChevronRight,
   Shield,
-  Columns
+  Columns,
+  Edit3,
+  Save,
+  X,
+  Plus,
+  Minus,
+  Sparkle
 } from 'lucide-react';
 
 interface PrintPaperViewProps {
@@ -76,7 +81,16 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.08);
   const [showWatermark, setShowWatermark] = useState<boolean>(true);
   const [density, setDensity] = useState<'compact' | 'ultra-compact' | 'normal'>('compact');
-  const [columnMode, setColumnMode] = useState<1 | 2>(2);
+  const [autoBalance, setAutoBalance] = useState<boolean>(true);
+  const [manualPage1Cap, setManualPage1Cap] = useState<number>(20);
+  const [manualOtherCap, setManualOtherCap] = useState<number>(26);
+  const [isManualCapacity, setIsManualCapacity] = useState<boolean>(false);
+  const [isLiveEditMode, setIsLiveEditMode] = useState<boolean>(false);
+
+  // Modal Editing for Question
+  const [editingQuestionIndex, setEditingQuestionIndex] = useState<number | null>(null);
+  const [editingQuestionDraft, setEditingQuestionDraft] = useState<Question | null>(null);
+
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportMessage, setExportMessage] = useState<string>('');
 
@@ -88,14 +102,35 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Active Questions List based on selection
-  const activeQuestions = useMemo(() => {
+  // Active Questions List based on selection + local modifications
+  const [editableQuestions, setEditableQuestions] = useState<Question[]>([]);
+
+  // Sync questions whenever source changes
+  useEffect(() => {
+    let sourceQuestions: Question[] = [];
     if (selectedSourceId === 'current') {
-      return currentTestQuestions;
+      sourceQuestions = currentTestQuestions;
+    } else {
+      const foundMock = mockHistory.find(m => m.id === selectedSourceId);
+      sourceQuestions = foundMock ? foundMock.questions : currentTestQuestions;
     }
-    const foundMock = mockHistory.find(m => m.id === selectedSourceId);
-    return foundMock ? foundMock.questions : currentTestQuestions;
+    setEditableQuestions(sourceQuestions.map(q => ({ ...q })));
   }, [selectedSourceId, currentTestQuestions, mockHistory]);
+
+  const activeQuestions = editableQuestions;
+
+  // Auto update recommended capacities whenever questions or density change
+  const recommendedCapacities = useMemo(() => {
+    return getRecommendedPageCapacities(activeQuestions.length, density);
+  }, [activeQuestions.length, density]);
+
+  // If not manually overriding, synchronize manual caps with recommendations
+  useEffect(() => {
+    if (!isManualCapacity) {
+      setManualPage1Cap(recommendedCapacities.p1Capacity);
+      setManualOtherCap(recommendedCapacities.otherCapacity);
+    }
+  }, [recommendedCapacities, isManualCapacity]);
 
   // Update title when switching source
   const handleSourceChange = (sourceId: string) => {
@@ -133,8 +168,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     logoDataUrl: activeLogoDataUrl,
     showRollNo,
     fontSize: density,
-    columnsCount: columnMode,
-    showBoxBorder: true
+    columnsCount: 2,
+    showBoxBorder: true,
+    autoBalance,
+    page1Capacity: isManualCapacity ? manualPage1Cap : undefined,
+    otherPageCapacity: isManualCapacity ? manualOtherCap : undefined
   }), [
     testTitle,
     duration,
@@ -146,8 +184,22 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     activeLogoDataUrl,
     showRollNo,
     density,
-    columnMode
+    autoBalance,
+    isManualCapacity,
+    manualPage1Cap,
+    manualOtherCap
   ]);
+
+  // Calculate discrete layout pages for preview and export
+  const paperPages: PaperPageLayout[] = useMemo(() => {
+    return paginateQuestionsFor2ColPaper(
+      activeQuestions,
+      density,
+      isManualCapacity ? manualPage1Cap : undefined,
+      isManualCapacity ? manualOtherCap : undefined,
+      autoBalance
+    );
+  }, [activeQuestions, density, isManualCapacity, manualPage1Cap, manualOtherCap, autoBalance]);
 
   // Custom Logo File Upload handler
   const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,11 +220,12 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   const applyHpPolicePreset = () => {
     setTestTitle('HP Police Constable Mock Test - 01');
     setDuration(60);
-    setTotalMarks(50);
+    setTotalMarks(activeQuestions.length || 50);
     setSelectedLogoId('hp_police');
     setWatermarkText('Gradeup Study');
     setDensity('compact');
-    setColumnMode(2);
+    setAutoBalance(true);
+    setIsManualCapacity(false);
     setInstructions(
 `1. All questions are compulsory and carry equal marks.
 2. There is No Negative Marking.
@@ -183,16 +236,51 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   const applyGradeupOfficialPreset = () => {
     setTestTitle('Gradeup Study Official Mock Test Series');
     setDuration(90);
-    setTotalMarks(activeQuestions.length);
+    setTotalMarks(activeQuestions.length || 50);
     setSelectedLogoId('gradeup_study');
     setWatermarkText('Gradeup Study');
     setDensity('compact');
-    setColumnMode(2);
+    setAutoBalance(true);
+    setIsManualCapacity(false);
     setInstructions(
 `1. All questions are compulsory and carry 1 mark each.
 2. There is a negative marking of 0.25 marks for every incorrect answer.
 3. Use Blue/Black ballpoint pen only to fill the OMR sheet.`
     );
+  };
+
+  // Inline Question Editing handlers
+  const handleStartEditQuestion = (originalIndex: number) => {
+    const q = activeQuestions[originalIndex];
+    if (q) {
+      setEditingQuestionIndex(originalIndex);
+      setEditingQuestionDraft({ ...q });
+    }
+  };
+
+  const handleSaveQuestionDraft = () => {
+    if (editingQuestionIndex !== null && editingQuestionDraft) {
+      setEditableQuestions(prev => {
+        const next = [...prev];
+        next[editingQuestionIndex] = { ...editingQuestionDraft };
+        return next;
+      });
+      setEditingQuestionIndex(null);
+      setEditingQuestionDraft(null);
+    }
+  };
+
+  const handleInlineOptionChange = (originalIndex: number, optKey: 'optionA' | 'optionB' | 'optionC' | 'optionD' | 'question' | 'translation', val: string) => {
+    setEditableQuestions(prev => {
+      const next = [...prev];
+      if (next[originalIndex]) {
+        next[originalIndex] = {
+          ...next[originalIndex],
+          [optKey]: val
+        };
+      }
+      return next;
+    });
   };
 
   // Export Triggers
@@ -237,11 +325,6 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     printNativeCompactAnswerKey(activeQuestions, bookletConfig);
   };
 
-  // Question splitting for 2-column preview
-  const midPoint = Math.ceil(activeQuestions.length / 2);
-  const leftQuestions = activeQuestions.slice(0, midPoint);
-  const rightQuestions = activeQuestions.slice(midPoint);
-
   // Column slice for Answer Key Preview
   const ansCols = activeQuestions.length > 60 ? 4 : activeQuestions.length > 30 ? 2 : 1;
   const itemsPerAnsCol = Math.ceil(activeQuestions.length / ansCols);
@@ -250,21 +333,10 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     ansColumnSlices.push(activeQuestions.slice(c * itemsPerAnsCol, (c + 1) * itemsPerAnsCol));
   }
 
-  // Estimated page calculation
-  const estimatedPages = useMemo(() => {
-    const qCount = activeQuestions.length;
-    if (qCount === 0) return 0;
-    const perPage = density === 'ultra-compact' ? 16 : density === 'compact' ? 13 : 9;
-    return Math.ceil(qCount / perPage);
-  }, [activeQuestions.length, density]);
-
-  const standard1ColPages = useMemo(() => {
-    const qCount = activeQuestions.length;
-    if (qCount === 0) return 0;
-    return Math.ceil(qCount / 5); // typical 1-col layout fits ~5 questions per page
-  }, [activeQuestions.length]);
-
-  const pagesSaved = Math.max(0, standard1ColPages - estimatedPages);
+  // Savings calculation
+  const totalPages = paperPages.length;
+  const standard1ColPages = Math.ceil(activeQuestions.length / 5);
+  const pagesSaved = Math.max(0, standard1ColPages - totalPages);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 lg:p-6 pb-24">
@@ -281,7 +353,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                 Printable Question Paper & Answer Key
               </h1>
               <p className="text-slate-300 text-sm mt-1 max-w-2xl">
-                Format your mock test into a clean, 2-column boxed exam paper and a 1-page ultra-compact answer sheet. Print directly or download high-resolution PDFs designed to minimize paper usage.
+                Format your mock test into clean, discrete A4 exam pages with closed 4-sided outlines and page numbers. Auto-balance distributes MCQs evenly to prevent empty spaces and reduce paper waste.
               </p>
             </div>
 
@@ -313,15 +385,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
               <span className="text-white font-bold text-base">{activeQuestions.length} MCQs</span>
             </div>
             <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-slate-400 block">Est. Booklet Pages:</span>
-              <span className="text-emerald-400 font-bold text-base">~{estimatedPages} Pages</span>
+              <span className="text-slate-400 block">Calculated Pages:</span>
+              <span className="text-emerald-400 font-bold text-base">{totalPages} {totalPages === 1 ? 'Page' : 'Pages'}</span>
             </div>
             <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
               <span className="text-slate-400 block">Paper Saved vs 1-Col:</span>
               <span className="text-blue-400 font-bold text-base">~{pagesSaved} Sheets ({Math.round((pagesSaved / Math.max(1, standard1ColPages)) * 100)}%)</span>
             </div>
             <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-slate-400 block">Answer Key Size:</span>
+              <span className="text-slate-400 block">Answer Key Layout:</span>
               <span className="text-purple-400 font-bold text-base">1 Single Page</span>
             </div>
           </div>
@@ -416,11 +488,202 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
             )}
           </div>
 
+          {/* Smart Pagination & Auto-Balance Settings */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-emerald-400" />
+                Smart Page Balancer
+              </h3>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                {totalPages} {totalPages === 1 ? 'Page' : 'Pages'} Total
+              </span>
+            </div>
+
+            {/* Auto-Balance Switch */}
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <Sparkle className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-slate-200">
+                    Auto-Balance Pages
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={autoBalance && !isManualCapacity}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setAutoBalance(true);
+                      setIsManualCapacity(false);
+                    } else {
+                      setIsManualCapacity(true);
+                      setAutoBalance(false);
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-slate-700 text-emerald-600 focus:ring-0 cursor-pointer"
+                />
+              </label>
+              <p className="text-[11px] text-slate-400">
+                Eliminates huge blank gaps at the bottom of pages by distributing MCQs evenly between pages.
+              </p>
+            </div>
+
+            {/* Current Page Breakdown Badge */}
+            <div className="bg-blue-950/40 border border-blue-800/40 rounded-lg p-2.5 text-xs text-blue-200 space-y-1">
+              <div className="font-semibold text-blue-300 flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" />
+                Page Allocation Breakdown:
+              </div>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {paperPages.map((p) => (
+                  <span
+                    key={p.pageNumber}
+                    className="px-2 py-1 bg-slate-900 border border-blue-500/30 rounded text-[11px] font-mono text-slate-200"
+                  >
+                    Page {p.pageNumber}: {p.col1.length + p.col2.length} MCQs ({p.col1.length}L + {p.col2.length}R)
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Manual Capacity Controls (Toggleable) */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-400">
+                  Custom Page Capacities (Fine Tuning)
+                </label>
+                {isManualCapacity && (
+                  <button
+                    onClick={() => {
+                      setIsManualCapacity(false);
+                      setAutoBalance(true);
+                    }}
+                    className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    Reset to Auto
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block mb-1">Page 1 Max MCQs:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setIsManualCapacity(true);
+                        setManualPage1Cap(prev => Math.max(6, prev - 2));
+                      }}
+                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      value={manualPage1Cap}
+                      onChange={(e) => {
+                        setIsManualCapacity(true);
+                        setManualPage1Cap(Number(e.target.value));
+                      }}
+                      className="w-full bg-transparent text-center font-bold text-sm text-slate-100 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        setIsManualCapacity(true);
+                        setManualPage1Cap(prev => Math.min(30, prev + 2));
+                      }}
+                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block mb-1">Other Pages Max:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setIsManualCapacity(true);
+                        setManualOtherCap(prev => Math.max(6, prev - 2));
+                      }}
+                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      value={manualOtherCap}
+                      onChange={(e) => {
+                        setIsManualCapacity(true);
+                        setManualOtherCap(Number(e.target.value));
+                      }}
+                      className="w-full bg-transparent text-center font-bold text-sm text-slate-100 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        setIsManualCapacity(true);
+                        setManualOtherCap(prev => Math.min(36, prev + 2));
+                      }}
+                      className="p-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 text-xs"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Density Selector */}
+            <div>
+              <label className="text-xs font-medium text-slate-400 block mb-1.5">
+                Font & Layout Density
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setDensity('ultra-compact')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
+                    density === 'ultra-compact'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Ultra Page-Saver
+                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">10.5px font</span>
+                </button>
+                <button
+                  onClick={() => setDensity('compact')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
+                    density === 'compact'
+                      ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Compact Booklet
+                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">11.5px font</span>
+                </button>
+                <button
+                  onClick={() => setDensity('normal')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
+                    density === 'normal'
+                      ? 'bg-purple-600/20 border-purple-500 text-purple-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Relaxed
+                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">12.5px font</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Exam Header & Logo Settings */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-lg space-y-4">
             <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 border-b border-slate-800 pb-2">
               <Settings2 className="w-4 h-4 text-blue-400" />
-              Exam Header & Badge Settings
+              Exam Header & Logo Settings
             </h3>
 
             {/* Test Title */}
@@ -540,56 +803,6 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                 className="w-full bg-slate-950 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500 font-sans"
               />
             </div>
-          </div>
-
-          {/* Density & Layout Controls */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-lg space-y-4">
-            <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 border-b border-slate-800 pb-2">
-              <Columns className="w-4 h-4 text-purple-400" />
-              Page-Saver Layout & Density
-            </h3>
-
-            {/* Density Selector */}
-            <div>
-              <label className="text-xs font-medium text-slate-400 block mb-1.5">
-                Layout Density (Questions per Page)
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setDensity('ultra-compact')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
-                    density === 'ultra-compact'
-                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  Ultra Page-Saver
-                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Max Qs / page</span>
-                </button>
-                <button
-                  onClick={() => setDensity('compact')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
-                    density === 'compact'
-                      ? 'bg-blue-600/20 border-blue-500 text-blue-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  Compact Booklet
-                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Sample PDF style</span>
-                </button>
-                <button
-                  onClick={() => setDensity('normal')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-bold transition-all text-center ${
-                    density === 'normal'
-                      ? 'bg-purple-600/20 border-purple-500 text-purple-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  Relaxed
-                  <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Larger fonts</span>
-                </button>
-              </div>
-            </div>
 
             {/* Watermark Controls */}
             <div>
@@ -638,10 +851,10 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: LIVE REAL-SIZE DOCUMENT PREVIEW */}
+        {/* RIGHT COLUMN: LIVE MULTI-PAGE REAL-SIZE DOCUMENT PREVIEW */}
         <div className="lg:col-span-8 space-y-4">
-          {/* Tab Navigation */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center justify-between">
+          {/* Tab Navigation & Live Edit Mode Toggle */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 overflow-x-auto">
               <button
                 onClick={() => setActiveTab('paper')}
@@ -652,7 +865,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
-                📄 2-Column Question Paper
+                📄 2-Column Question Paper ({totalPages} {totalPages === 1 ? 'Page' : 'Pages'})
               </button>
 
               <button
@@ -692,170 +905,315 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
               </button>
             </div>
 
-            <div className="text-xs text-slate-400 font-mono hidden sm:block">
-              A4 Format • Print Ready
+            {/* Live Edit Mode Switch */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsLiveEditMode(!isLiveEditMode)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
+                  isLiveEditMode
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+                title="Click any text in the preview to edit"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>{isLiveEditMode ? 'Live Edit: ON' : 'Live Edit'}</span>
+              </button>
             </div>
           </div>
 
-          {/* DOCUMENT PREVIEW CONTAINER (Realistic White A4 Sheet with Drop Shadow) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[820px] flex justify-center">
-            {/* White Sheet Container */}
-            <div className="w-full max-w-[760px] bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 relative min-h-[960px] font-sans">
-              {/* Diagonal Watermark Overlay */}
-              {showWatermark && watermarkText && (
-                <div
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
-                  style={{ zIndex: 0 }}
-                >
-                  <span
-                    className="text-6xl font-extrabold uppercase tracking-widest text-slate-900 transform -rotate-35 whitespace-nowrap"
-                    style={{ opacity: watermarkOpacity }}
-                  >
-                    {watermarkText}
-                  </span>
-                </div>
-              )}
-
-              {/* CONTENT LAYER */}
-              <div className="relative z-10">
-                {/* 1. QUESTION PAPER VIEW OR COMBINED VIEW */}
-                {(activeTab === 'paper' || activeTab === 'combined') && (
-                  <div>
-                    {/* Header with Logo */}
-                    <div className="text-center mb-3">
-                      {activeLogoDataUrl && (
-                        <div className="flex justify-center mb-1.5">
-                          <img
-                            src={activeLogoDataUrl}
-                            alt="Logo"
-                            className="h-14 w-auto object-contain"
-                          />
-                        </div>
-                      )}
-                      <h1 className="text-lg font-extrabold text-black uppercase tracking-tight m-0">
-                        {testTitle}
-                      </h1>
-                      <div className="text-xs font-bold text-black mt-1 pb-2 border-b-[1.5px] border-black flex items-center justify-center gap-3">
-                        <span>Time Allowed: {duration} Mins</span>
-                        <span>|</span>
-                        <span>Max Marks: {totalMarks}</span>
-                        {showRollNo && (
-                          <>
-                            <span>|</span>
-                            <span>Roll No: ____________</span>
-                          </>
-                        )}
-                      </div>
+          {/* DOCUMENT PREVIEW CONTAINER (Realistic White A4 Pages with Discrete Separation) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[860px] flex flex-col items-center gap-8">
+            {/* 1. QUESTION PAPER VIEW OR COMBINED VIEW: Render each discrete page */}
+            {(activeTab === 'paper' || activeTab === 'combined') && (
+              <div className="w-full flex flex-col items-center gap-8">
+                {paperPages.map((page, pageIdx) => (
+                  <div key={page.pageNumber} className="w-full max-w-[760px] flex flex-col items-center">
+                    {/* Page Break Label */}
+                    <div className="w-full flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
+                      <span className="font-mono font-bold text-slate-300">
+                        📄 Page {page.pageNumber} of {page.totalPages}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {page.col1.length + page.col2.length} MCQs ({page.col1.length} Left, {page.col2.length} Right)
+                      </span>
                     </div>
 
-                    {/* General Instructions Box */}
-                    {instructions && (
-                      <div className="border border-slate-400 rounded-sm p-2 mb-3 text-[10px] leading-relaxed text-black bg-white">
-                        <strong className="block mb-0.5 text-black">General Instructions:</strong>
-                        <div className="whitespace-pre-line">{instructions}</div>
-                      </div>
-                    )}
+                    {/* A4 Sheet Container */}
+                    <div className="w-full bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 relative min-h-[960px] font-sans flex flex-col justify-between border border-slate-300">
+                      {/* Diagonal Watermark Overlay */}
+                      {showWatermark && watermarkText && (
+                        <div
+                          className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
+                          style={{ zIndex: 0 }}
+                        >
+                          <span
+                            className="text-6xl font-extrabold uppercase tracking-widest text-slate-900 transform -rotate-35 whitespace-nowrap"
+                            style={{ opacity: watermarkOpacity }}
+                          >
+                            {watermarkText}
+                          </span>
+                        </div>
+                      )}
 
-                    {/* 2-Column Boxed Questions Grid (Identical to Sample PDF) */}
-                    <div className="border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black">
-                      {/* Left Column */}
-                      <div className="p-2.5 border-r-[1.5px] border-black space-y-2.5">
-                        {leftQuestions.map((q, idx) => {
-                          const qNum = idx + 1;
-                          const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
-                          const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
-                          const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
-                          const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
-                          const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
-
-                          return (
-                            <div
-                              key={q.id || idx}
-                              className={`text-[11px] leading-snug break-inside-avoid ${
-                                density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
-                              }`}
-                            >
-                              <div className="font-bold text-black">
-                                <span>Q{qNum}. </span>
-                                <span>{formatMathSymbols(q.question)}</span>
+                      {/* Header Section */}
+                      <div className="relative z-10">
+                        {page.isFirstPage ? (
+                          <div>
+                            {/* Top Exam Header */}
+                            <div className="text-center mb-3">
+                              {activeLogoDataUrl && (
+                                <div className="flex justify-center mb-1.5">
+                                  <img
+                                    src={activeLogoDataUrl}
+                                    alt="Logo"
+                                    className="h-14 w-auto object-contain"
+                                  />
+                                </div>
+                              )}
+                              <h1 className="text-lg font-extrabold text-black uppercase tracking-tight m-0">
+                                {testTitle}
+                              </h1>
+                              <div className="text-xs font-bold text-black mt-1 pb-2 border-b-[1.5px] border-black flex items-center justify-center gap-3">
+                                <span>Time Allowed: {duration} Mins</span>
+                                <span>|</span>
+                                <span>Max Marks: {totalMarks}</span>
+                                {showRollNo && (
+                                  <>
+                                    <span>|</span>
+                                    <span>Roll No: ____________</span>
+                                  </>
+                                )}
                               </div>
-                              {shouldDisplayTranslation(q.question, q.translation) && (
-                                <div className="text-slate-800 text-[10.5px]">
-                                  {formatMathSymbols(q.translation!)}
-                                </div>
-                              )}
-                              {isShort ? (
-                                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
-                                  <div>{optA}</div>
-                                  <div>{optB}</div>
-                                  <div>{optC}</div>
-                                  <div>{optD}</div>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
-                                  <div>{optA}</div>
-                                  <div>{optB}</div>
-                                  <div>{optC}</div>
-                                  <div>{optD}</div>
-                                </div>
-                              )}
                             </div>
-                          );
-                        })}
+
+                            {/* General Instructions Box */}
+                            {instructions && (
+                              <div className="border border-slate-400 rounded-sm p-2 mb-3 text-[10px] leading-relaxed text-black bg-white">
+                                <strong className="block mb-0.5 text-black">General Instructions:</strong>
+                                <div className="whitespace-pre-line">{instructions}</div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="mb-3 pb-1.5 border-b-[1.5px] border-black flex items-center justify-between text-xs font-bold text-black">
+                            <span>{testTitle}</span>
+                            <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded font-mono">
+                              PAGE {page.pageNumber} OF {page.totalPages}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Right Column */}
-                      <div className="p-2.5 space-y-2.5">
-                        {rightQuestions.map((q, idx) => {
-                          const qNum = midPoint + idx + 1;
-                          const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
-                          const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
-                          const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
-                          const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
-                          const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+                      {/* 2-Column Boxed Questions Grid with Full Outer Border and Center Line */}
+                      <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-2">
+                        {/* Left Column */}
+                        <div className="p-2.5 border-r-[1.5px] border-black space-y-2">
+                          {page.col1.map((item) => {
+                            const qNum = item.originalIndex + 1;
+                            const q = item.question;
+                            const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
+                            const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
+                            const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
+                            const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
+                            const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
-                          return (
-                            <div
-                              key={q.id || idx}
-                              className={`text-[11px] leading-snug break-inside-avoid ${
-                                density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
-                              }`}
-                            >
-                              <div className="font-bold text-black">
-                                <span>Q{qNum}. </span>
-                                <span>{formatMathSymbols(q.question)}</span>
+                            return (
+                              <div
+                                key={q.id || item.originalIndex}
+                                className={`text-[11px] leading-snug break-inside-avoid relative group ${
+                                  density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
+                                }`}
+                              >
+                                {isLiveEditMode && (
+                                  <button
+                                    onClick={() => handleStartEditQuestion(item.originalIndex)}
+                                    className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 bg-blue-600 text-white p-1 rounded shadow text-[9px] flex items-center gap-0.5 z-20"
+                                    title="Edit Question"
+                                  >
+                                    <Edit3 className="w-2.5 h-2.5" />
+                                    Edit
+                                  </button>
+                                )}
+
+                                <div className="font-bold text-black">
+                                  <span>Q{qNum}. </span>
+                                  {isLiveEditMode ? (
+                                    <span
+                                      contentEditable
+                                      suppressContentEditableWarning
+                                      onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                      className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                    >
+                                      {formatMathSymbols(q.question)}
+                                    </span>
+                                  ) : (
+                                    <span>{formatMathSymbols(q.question)}</span>
+                                  )}
+                                </div>
+
+                                {shouldDisplayTranslation(q.question, q.translation) && (
+                                  <div className="text-slate-800 text-[10.5px]">
+                                    {isLiveEditMode ? (
+                                      <span
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
+                                        className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
+                                      >
+                                        {formatMathSymbols(q.translation!)}
+                                      </span>
+                                    ) : (
+                                      formatMathSymbols(q.translation!)
+                                    )}
+                                  </div>
+                                )}
+
+                                {isShort ? (
+                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
+                                    <div>{optA}</div>
+                                    <div>{optB}</div>
+                                    <div>{optC}</div>
+                                    <div>{optD}</div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
+                                    <div>{optA}</div>
+                                    <div>{optB}</div>
+                                    <div>{optC}</div>
+                                    <div>{optD}</div>
+                                  </div>
+                                )}
                               </div>
-                              {shouldDisplayTranslation(q.question, q.translation) && (
-                                <div className="text-slate-800 text-[10.5px]">
-                                  {formatMathSymbols(q.translation!)}
+                            );
+                          })}
+                        </div>
+
+                        {/* Right Column */}
+                        <div className="p-2.5 space-y-2">
+                          {page.col2.map((item) => {
+                            const qNum = item.originalIndex + 1;
+                            const q = item.question;
+                            const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
+                            const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
+                            const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
+                            const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
+                            const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+
+                            return (
+                              <div
+                                key={q.id || item.originalIndex}
+                                className={`text-[11px] leading-snug break-inside-avoid relative group ${
+                                  density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
+                                }`}
+                              >
+                                {isLiveEditMode && (
+                                  <button
+                                    onClick={() => handleStartEditQuestion(item.originalIndex)}
+                                    className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 bg-blue-600 text-white p-1 rounded shadow text-[9px] flex items-center gap-0.5 z-20"
+                                    title="Edit Question"
+                                  >
+                                    <Edit3 className="w-2.5 h-2.5" />
+                                    Edit
+                                  </button>
+                                )}
+
+                                <div className="font-bold text-black">
+                                  <span>Q{qNum}. </span>
+                                  {isLiveEditMode ? (
+                                    <span
+                                      contentEditable
+                                      suppressContentEditableWarning
+                                      onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                      className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                    >
+                                      {formatMathSymbols(q.question)}
+                                    </span>
+                                  ) : (
+                                    <span>{formatMathSymbols(q.question)}</span>
+                                  )}
                                 </div>
-                              )}
-                              {isShort ? (
-                                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
-                                  <div>{optA}</div>
-                                  <div>{optB}</div>
-                                  <div>{optC}</div>
-                                  <div>{optD}</div>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
-                                  <div>{optA}</div>
-                                  <div>{optB}</div>
-                                  <div>{optC}</div>
-                                  <div>{optD}</div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+
+                                {shouldDisplayTranslation(q.question, q.translation) && (
+                                  <div className="text-slate-800 text-[10.5px]">
+                                    {isLiveEditMode ? (
+                                      <span
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
+                                        className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
+                                      >
+                                        {formatMathSymbols(q.translation!)}
+                                      </span>
+                                    ) : (
+                                      formatMathSymbols(q.translation!)
+                                    )}
+                                  </div>
+                                )}
+
+                                {isShort ? (
+                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] text-black pt-0.5">
+                                    <div>{optA}</div>
+                                    <div>{optB}</div>
+                                    <div>{optC}</div>
+                                    <div>{optD}</div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col gap-0.5 text-[10.5px] text-black pt-0.5">
+                                    <div>{optA}</div>
+                                    <div>{optB}</div>
+                                    <div>{optC}</div>
+                                    <div>{optD}</div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Footer Section with Page Number */}
+                      <div className="relative z-10 mt-2 pt-2 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-700 font-bold">
+                        <span>Gradeup Study Official Test Series</span>
+                        <span className="bg-slate-100 text-slate-900 px-2 py-0.5 rounded font-mono border border-slate-300">
+                          Page {page.pageNumber} of {page.totalPages}
+                        </span>
                       </div>
                     </div>
                   </div>
-                )}
+                ))}
+              </div>
+            )}
 
-                {/* 2. ANSWER KEY VIEW (1-Page Ultra-Compact, exactly matching Sample PDF Page 1) */}
-                {(activeTab === 'answer-key' || activeTab === 'combined') && (
-                  <div className={activeTab === 'combined' ? 'mt-12 pt-8 border-t-2 border-dashed border-slate-400' : ''}>
+            {/* 2. ANSWER KEY VIEW (1-Page Ultra-Compact) */}
+            {(activeTab === 'answer-key' || activeTab === 'combined') && (
+              <div className="w-full max-w-[760px]">
+                <div className="w-full flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
+                  <span className="font-mono font-bold text-slate-300">
+                    🔑 Answer Key Page (1 Single Sheet)
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Total {activeQuestions.length} Answers
+                  </span>
+                </div>
+
+                <div className="w-full bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 relative min-h-[960px] font-sans flex flex-col justify-between border border-slate-300">
+                  {/* Diagonal Watermark */}
+                  {showWatermark && watermarkText && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
+                      style={{ zIndex: 0 }}
+                    >
+                      <span
+                        className="text-6xl font-extrabold uppercase tracking-widest text-slate-900 transform -rotate-35 whitespace-nowrap"
+                        style={{ opacity: watermarkOpacity }}
+                      >
+                        {watermarkText}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="relative z-10">
                     {/* Header */}
                     <div className="text-center mb-4">
                       {activeLogoDataUrl && (
@@ -886,11 +1244,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                     {/* Answer Key Title Box */}
                     <div className="border border-slate-400 rounded-sm p-1.5 mb-6 text-center bg-slate-50">
                       <span className="text-sm font-extrabold text-black tracking-wide uppercase">
-                        Answer Key
+                        Official Answer Key
                       </span>
                     </div>
 
-                    {/* Compact Answer Grid (Multi-Column) */}
+                    {/* Compact Multi-Column Answer Grid */}
                     <div
                       className={`grid gap-x-8 gap-y-2 px-8 ${
                         ansCols === 4 ? 'grid-cols-4' : ansCols === 2 ? 'grid-cols-2' : 'grid-cols-1'
@@ -917,45 +1275,180 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       })}
                     </div>
                   </div>
-                )}
 
-                {/* 3. DETAILED EXPLANATIONS VIEW */}
-                {activeTab === 'explanations' && (
-                  <div className="space-y-4">
-                    <div className="text-center pb-3 border-b border-black">
-                      <h2 className="text-base font-bold text-black uppercase">
-                        {testTitle} - Detailed Solutions & Answer Key
-                      </h2>
-                      <span className="text-xs text-slate-600">Total {activeQuestions.length} Questions</span>
-                    </div>
-
-                    <div className="space-y-3">
-                      {activeQuestions.map((q, idx) => (
-                        <div key={q.id || idx} className="border border-slate-300 rounded p-2.5 text-xs text-black space-y-1">
-                          <div className="flex items-center justify-between font-bold">
-                            <span>Q{idx + 1}. {q.subject && `[${q.subject}]`}</span>
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-extrabold">
-                              Correct: Option {q.answer}
-                            </span>
-                          </div>
-                          <div className="font-medium">{formatMathSymbols(q.question)}</div>
-                          {q.translation && (
-                            <div className="text-slate-700 italic">{formatMathSymbols(q.translation)}</div>
-                          )}
-                          <div className="mt-1 pt-1 border-t border-slate-200 text-slate-800 bg-slate-50 p-1.5 rounded">
-                            <strong>Explanation: </strong>
-                            {q.explanation ? formatMathSymbols(q.explanation) : `Option ${q.answer} is the correct answer.`}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {/* Footer */}
+                  <div className="relative z-10 mt-6 pt-2 border-t border-slate-300 flex items-center justify-between text-[10px] text-slate-700 font-bold">
+                    <span>Gradeup Study Official Test Series</span>
+                    <span className="bg-slate-100 text-slate-900 px-2 py-0.5 rounded font-mono border border-slate-300">
+                      Answer Key Page 1 of 1
+                    </span>
                   </div>
-                )}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* 3. DETAILED EXPLANATIONS VIEW */}
+            {activeTab === 'explanations' && (
+              <div className="w-full max-w-[760px] bg-white text-black shadow-2xl rounded-sm p-6 lg:p-8 space-y-4">
+                <div className="text-center pb-3 border-b border-black">
+                  <h2 className="text-base font-bold text-black uppercase">
+                    {testTitle} - Detailed Solutions & Answer Key
+                  </h2>
+                  <span className="text-xs text-slate-600">Total {activeQuestions.length} Questions</span>
+                </div>
+
+                <div className="space-y-3">
+                  {activeQuestions.map((q, idx) => (
+                    <div key={q.id || idx} className="border border-slate-300 rounded p-2.5 text-xs text-black space-y-1">
+                      <div className="flex items-center justify-between font-bold">
+                        <span>Q{idx + 1}. {q.subject && `[${q.subject}]`}</span>
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-extrabold">
+                          Correct: Option {q.answer}
+                        </span>
+                      </div>
+                      <div className="font-medium">{formatMathSymbols(q.question)}</div>
+                      {q.translation && (
+                        <div className="text-slate-700 italic">{formatMathSymbols(q.translation)}</div>
+                      )}
+                      <div className="mt-1 pt-1 border-t border-slate-200 text-slate-800 bg-slate-50 p-1.5 rounded">
+                        <strong>Explanation: </strong>
+                        {q.explanation ? formatMathSymbols(q.explanation) : `Option ${q.answer} is the correct answer.`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Edit Question Modal */}
+      {editingQuestionIndex !== null && editingQuestionDraft && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-blue-400" />
+                Edit Question {editingQuestionIndex + 1}
+              </h3>
+              <button
+                onClick={() => {
+                  setEditingQuestionIndex(null);
+                  setEditingQuestionDraft(null);
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+              <div>
+                <label className="text-xs font-semibold text-slate-400 block mb-1">
+                  Question Text (English)
+                </label>
+                <textarea
+                  rows={3}
+                  value={editingQuestionDraft.question}
+                  onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, question: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-400 block mb-1">
+                  Translation (Hindi / Regional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingQuestionDraft.translation || ''}
+                  onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, translation: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 block mb-1">Option (A)</label>
+                  <input
+                    type="text"
+                    value={editingQuestionDraft.optionA || ''}
+                    onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, optionA: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 block mb-1">Option (B)</label>
+                  <input
+                    type="text"
+                    value={editingQuestionDraft.optionB || ''}
+                    onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, optionB: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 block mb-1">Option (C)</label>
+                  <input
+                    type="text"
+                    value={editingQuestionDraft.optionC || ''}
+                    onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, optionC: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-400 block mb-1">Option (D)</label>
+                  <input
+                    type="text"
+                    value={editingQuestionDraft.optionD || ''}
+                    onChange={(e) => setEditingQuestionDraft({ ...editingQuestionDraft, optionD: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-400 block mb-1">Correct Answer</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(['A', 'B', 'C', 'D'] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setEditingQuestionDraft({ ...editingQuestionDraft, answer: opt })}
+                      className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        editingQuestionDraft.answer === opt
+                          ? 'bg-emerald-600 border-emerald-500 text-white shadow'
+                          : 'bg-slate-950 border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      Option {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setEditingQuestionIndex(null);
+                  setEditingQuestionDraft(null);
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveQuestionDraft}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow flex items-center gap-1.5"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
