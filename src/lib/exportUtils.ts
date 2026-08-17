@@ -1196,6 +1196,7 @@ export interface BookletCustomConfig {
   otherPageCapacity?: number;
   autoBalance?: boolean;
   footerText?: string;
+  customPages?: PaperPageLayout[];
 }
 
 export interface PaperPageQuestion {
@@ -1710,13 +1711,15 @@ export async function exportCompact2ColPdfTestPaper(
     }).join('');
   };
 
-  const pages = paginateQuestionsFor2ColPaper(
-    questions,
-    config.fontSize || 'compact',
-    config.page1Capacity,
-    config.otherPageCapacity,
-    config.autoBalance !== false
-  );
+  const pages = config.customPages && config.customPages.length > 0
+    ? config.customPages
+    : paginateQuestionsFor2ColPaper(
+        questions,
+        config.fontSize || 'compact',
+        config.page1Capacity,
+        config.otherPageCapacity,
+        config.autoBalance !== false
+      );
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const imgWidth = 210;
@@ -1792,11 +1795,11 @@ export async function exportCompact2ColPdfTestPaper(
           <!-- 2-Column Boxed Layout with Outer Border on all 4 sides and Center Line -->
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
             <!-- Left Column -->
-            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
             <!-- Right Column -->
-            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
@@ -2054,13 +2057,15 @@ export async function exportCombinedBookletPdf(
     }).join('');
   };
 
-  const pages = paginateQuestionsFor2ColPaper(
-    questions,
-    config.fontSize || 'compact',
-    config.page1Capacity,
-    config.otherPageCapacity,
-    config.autoBalance !== false
-  );
+  const pages = config.customPages && config.customPages.length > 0
+    ? config.customPages
+    : paginateQuestionsFor2ColPaper(
+        questions,
+        config.fontSize || 'compact',
+        config.page1Capacity,
+        config.otherPageCapacity,
+        config.autoBalance !== false
+      );
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const imgWidth = 210;
@@ -2132,10 +2137,10 @@ export async function exportCombinedBookletPdf(
           </div>
 
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 4px; overflow: hidden;">
-            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px 6px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col1)}
             </div>
-            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; overflow: hidden;">
+            <div style="padding: 6px 8px 6px 8px; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; overflow: hidden;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
@@ -2349,13 +2354,15 @@ export function printNativeCompact2ColPaper(
     }).join('');
   };
 
-  const pages = paginateQuestionsFor2ColPaper(
-    questions,
-    config.fontSize || 'compact',
-    config.page1Capacity,
-    config.otherPageCapacity,
-    config.autoBalance !== false
-  );
+  const pages = config.customPages && config.customPages.length > 0
+    ? config.customPages
+    : paginateQuestionsFor2ColPaper(
+        questions,
+        config.fontSize || 'compact',
+        config.page1Capacity,
+        config.otherPageCapacity,
+        config.autoBalance !== false
+      );
 
   const pagesHtml = pages.map(page => {
     let header = '';
@@ -2493,8 +2500,7 @@ export function printNativeCompact2ColPaper(
           border-right: 1.5px solid #000;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
-          height: 100%;
+          justify-content: flex-start;
           box-sizing: border-box;
           overflow: hidden;
         }
@@ -2502,8 +2508,7 @@ export function printNativeCompact2ColPaper(
           padding: 4px 7px;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
-          height: 100%;
+          justify-content: flex-start;
           box-sizing: border-box;
           overflow: hidden;
         }

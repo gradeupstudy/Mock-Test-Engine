@@ -47,7 +47,16 @@ import {
   ShieldCheck,
   Lock,
   Undo2,
-  AlertCircle
+  AlertCircle,
+  CornerDownLeft,
+  CornerDownRight,
+  Scissors,
+  MoveLeft,
+  MoveRight,
+  RotateCcw,
+  Keyboard,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 
 interface PrintPaperViewProps {
@@ -93,6 +102,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   const [manualOtherCap, setManualOtherCap] = useState<number>(26);
   const [isManualCapacity, setIsManualCapacity] = useState<boolean>(false);
   const [isLiveEditMode, setIsLiveEditMode] = useState<boolean>(false);
+  const [customPages, setCustomPages] = useState<PaperPageLayout[] | null>(null);
 
   // AI Auto-Fix State
   const [isAiOptimizing, setIsAiOptimizing] = useState<boolean>(false);
@@ -234,6 +244,22 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     return preset ? preset.svgDataUrl : '';
   }, [selectedLogoId, customLogoUrl]);
 
+  // Calculate automatic discrete layout pages
+  const autoPaperPages: PaperPageLayout[] = useMemo(() => {
+    return paginateQuestionsFor2ColPaper(
+      activeQuestions,
+      density,
+      isManualCapacity ? manualPage1Cap : undefined,
+      isManualCapacity ? manualOtherCap : undefined,
+      autoBalance
+    );
+  }, [activeQuestions, density, isManualCapacity, manualPage1Cap, manualOtherCap, autoBalance]);
+
+  // Effective pages either come from manual user adjustments or automatic calculation
+  const paperPages: PaperPageLayout[] = useMemo(() => {
+    return customPages || autoPaperPages;
+  }, [customPages, autoPaperPages]);
+
   // Build config object
   const bookletConfig: BookletCustomConfig = useMemo(() => ({
     testName: testTitle,
@@ -249,7 +275,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     showBoxBorder: true,
     autoBalance,
     page1Capacity: isManualCapacity ? manualPage1Cap : undefined,
-    otherPageCapacity: isManualCapacity ? manualOtherCap : undefined
+    otherPageCapacity: isManualCapacity ? manualOtherCap : undefined,
+    customPages: customPages || undefined
   }), [
     testTitle,
     duration,
@@ -264,19 +291,180 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     autoBalance,
     isManualCapacity,
     manualPage1Cap,
-    manualOtherCap
+    manualOtherCap,
+    customPages
   ]);
 
-  // Calculate discrete layout pages for preview and export
-  const paperPages: PaperPageLayout[] = useMemo(() => {
-    return paginateQuestionsFor2ColPaper(
-      activeQuestions,
-      density,
-      isManualCapacity ? manualPage1Cap : undefined,
-      isManualCapacity ? manualOtherCap : undefined,
-      autoBalance
-    );
-  }, [activeQuestions, density, isManualCapacity, manualPage1Cap, manualOtherCap, autoBalance]);
+  // Reset custom layout if density or manual capacity or autoBalance changes
+  useEffect(() => {
+    setCustomPages(null);
+  }, [selectedSourceId, activeQuestions.length, density]);
+
+  // Manual MCQ Shifting Functions (Backspace / Enter / Page Transfer)
+  const handleShiftQuestionBack = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    const sourceCol = colIdx === 1 ? current[pageIdx].col1 : current[pageIdx].col2;
+    if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
+
+    const [movedItem] = sourceCol.splice(itemIdxInCol, 1);
+
+    if (colIdx === 2) {
+      // Shift from Left of Col 2 to End of Col 1 on the same page
+      current[pageIdx].col1.push(movedItem);
+    } else {
+      // Shift from Col 1 of this page to Col 2 of previous page (if pageIdx > 0)
+      if (pageIdx > 0) {
+        current[pageIdx - 1].col2.push(movedItem);
+      } else {
+        // Can't move back from start of Page 1 Col 1
+        sourceCol.splice(itemIdxInCol, 0, movedItem);
+        return;
+      }
+    }
+
+    // Filter out pages that became completely empty
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  const handleShiftQuestionForward = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    const sourceCol = colIdx === 1 ? current[pageIdx].col1 : current[pageIdx].col2;
+    if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
+
+    const [movedItem] = sourceCol.splice(itemIdxInCol, 1);
+
+    if (colIdx === 1) {
+      // Shift from Col 1 to Start of Col 2 on the same page
+      current[pageIdx].col2.unshift(movedItem);
+    } else {
+      // Shift from Col 2 to Col 1 of next page
+      if (pageIdx < current.length - 1) {
+        current[pageIdx + 1].col1.unshift(movedItem);
+      } else {
+        // Create new next page
+        current.push({
+          pageNumber: current.length + 1,
+          totalPages: current.length + 1,
+          isFirstPage: false,
+          col1: [movedItem],
+          col2: [],
+          col1Height: movedItem.estimatedHeight,
+          col2Height: 0
+        });
+      }
+    }
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  const handlePushBreakToNextPage = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    let itemsToMove: any[] = [];
+    if (colIdx === 1) {
+      const col1Tail = current[pageIdx].col1.splice(itemIdxInCol);
+      const col2All = current[pageIdx].col2.splice(0);
+      itemsToMove = [...col1Tail, ...col2All];
+    } else {
+      itemsToMove = current[pageIdx].col2.splice(itemIdxInCol);
+    }
+
+    if (itemsToMove.length === 0) return;
+
+    // Distribute moved items evenly across the new page
+    const half = Math.ceil(itemsToMove.length / 2);
+    const newPage: PaperPageLayout = {
+      pageNumber: pageIdx + 2,
+      totalPages: current.length + 1,
+      isFirstPage: false,
+      col1: itemsToMove.slice(0, half),
+      col2: itemsToMove.slice(half),
+      col1Height: 0,
+      col2Height: 0
+    };
+
+    current.splice(pageIdx + 1, 0, newPage);
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  const handleTransferQuestionBetweenPages = (fromPageIdx: number, toPageIdx: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    if (fromPageIdx < 0 || fromPageIdx >= current.length || toPageIdx < 0 || toPageIdx >= current.length) return;
+
+    if (fromPageIdx < toPageIdx) {
+      // Move last item of fromPage to start of toPage
+      const fromPage = current[fromPageIdx];
+      const movedItem = fromPage.col2.length > 0 ? fromPage.col2.pop() : fromPage.col1.pop();
+      if (movedItem) {
+        current[toPageIdx].col1.unshift(movedItem);
+      }
+    } else {
+      // Move first item of fromPage to end of toPage
+      const fromPage = current[fromPageIdx];
+      const movedItem = fromPage.col1.length > 0 ? fromPage.col1.shift() : fromPage.col2.shift();
+      if (movedItem) {
+        current[toPageIdx].col2.push(movedItem);
+      }
+    }
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  const handleResetToAutoLayout = () => {
+    setCustomPages(null);
+  };
 
   // Custom Logo File Upload handler
   const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -771,20 +959,58 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
               </div>
             )}
 
-            {/* Current Page Breakdown Badge */}
-            <div className="bg-blue-950/40 border border-blue-800/40 rounded-lg p-2.5 text-xs text-blue-200 space-y-1">
-              <div className="font-semibold text-blue-300 flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5" />
-                Page Allocation Breakdown:
-              </div>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {paperPages.map((p) => (
-                  <span
-                    key={p.pageNumber}
-                    className="px-2 py-1 bg-slate-900 border border-blue-500/30 rounded text-[11px] font-mono text-slate-200"
+            {/* Current Page Breakdown Badge & Interactive Balancer */}
+            <div className="bg-blue-950/40 border border-blue-800/40 rounded-lg p-2.5 text-xs text-blue-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-blue-300 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5" />
+                  Page Distribution & Breaks:
+                </div>
+                {customPages && (
+                  <button
+                    onClick={handleResetToAutoLayout}
+                    className="text-[10px] text-amber-300 hover:underline flex items-center gap-0.5"
+                    title="Reset to automatic flow"
                   >
-                    Page {p.pageNumber}: {p.col1.length + p.col2.length} MCQs ({p.col1.length}L + {p.col2.length}R)
-                  </span>
+                    <RotateCcw className="w-2.5 h-2.5" />
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1.5 pt-0.5">
+                {paperPages.map((p, pIdx) => (
+                  <div
+                    key={p.pageNumber}
+                    className="flex items-center justify-between px-2 py-1.5 bg-slate-900/90 border border-blue-500/30 rounded text-[11px] font-mono text-slate-200"
+                  >
+                    <div>
+                      <strong className="text-white">Page {p.pageNumber}:</strong> {p.col1.length + p.col2.length} MCQs
+                      <span className="text-slate-400 text-[10px] ml-1">({p.col1.length}L | {p.col2.length}R)</span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {pIdx > 0 && (
+                        <button
+                          onClick={() => handleTransferQuestionBetweenPages(pIdx, pIdx - 1)}
+                          className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[9px] border border-slate-700 flex items-center gap-0.5"
+                          title={`Move 1 MCQ to Page ${p.pageNumber - 1}`}
+                        >
+                          <ArrowLeft className="w-2.5 h-2.5" />
+                          Prev
+                        </button>
+                      )}
+                      {pIdx < paperPages.length - 1 && (
+                        <button
+                          onClick={() => handleTransferQuestionBetweenPages(pIdx, pIdx + 1)}
+                          className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[9px] border border-slate-700 flex items-center gap-0.5"
+                          title={`Move 1 MCQ to Page ${p.pageNumber + 1}`}
+                        >
+                          Next
+                          <ArrowRight className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1165,7 +1391,41 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
           </div>
 
           {/* DOCUMENT PREVIEW CONTAINER (Realistic White A4 Pages with Discrete Separation) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[860px] flex flex-col items-center gap-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 lg:p-6 overflow-auto max-h-[860px] flex flex-col items-center gap-6">
+            {/* Manual Pagination Banner & Controls */}
+            {(activeTab === 'paper' || activeTab === 'combined') && (
+              <div className="w-full max-w-[760px] bg-slate-950 border border-slate-800 rounded-xl p-3 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {customPages ? (
+                    <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Custom Page Breaks Active ({paperPages.length} Pages)
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 bg-blue-500/20 border border-blue-500/40 text-blue-300 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5" />
+                      Auto-Balanced Layout ({paperPages.length} Pages)
+                    </span>
+                  )}
+                  {customPages && (
+                    <button
+                      onClick={handleResetToAutoLayout}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border border-slate-700"
+                      title="Reset all manual shifts back to auto-balanced flow"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Reset to Auto
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90 font-medium">
+                  <Keyboard className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Hover MCQ & click <strong>◀ Backspace</strong> or <strong>Enter ▶</strong> to shift!</span>
+                </div>
+              </div>
+            )}
+
             {/* 1. QUESTION PAPER VIEW OR COMBINED VIEW: Render each discrete page */}
             {(activeTab === 'paper' || activeTab === 'combined') && (
               <div className="w-full flex flex-col items-center gap-8">
@@ -1173,12 +1433,38 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                   <div key={page.pageNumber} className="w-full max-w-[760px] flex flex-col items-center">
                     {/* Page Break Label */}
                     <div className="w-full flex items-center justify-between text-xs text-slate-400 mb-2 px-1">
-                      <span className="font-mono font-bold text-slate-300">
-                        📄 Page {page.pageNumber} of {page.totalPages}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        {page.col1.length + page.col2.length} MCQs ({page.col1.length} Left, {page.col2.length} Right)
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-300">
+                          📄 Page {page.pageNumber} of {page.totalPages}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {page.col1.length + page.col2.length} MCQs ({page.col1.length} Left, {page.col2.length} Right)
+                        </span>
+                      </div>
+
+                      {/* Quick Page Transfer Buttons */}
+                      <div className="flex items-center gap-1">
+                        {pageIdx > 0 && (
+                          <button
+                            onClick={() => handleTransferQuestionBetweenPages(pageIdx, pageIdx - 1)}
+                            className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-semibold flex items-center gap-0.5 border border-slate-700 transition-all"
+                            title={`Move first MCQ from Page ${page.pageNumber} to Page ${page.pageNumber - 1}`}
+                          >
+                            <ArrowLeft className="w-2.5 h-2.5" />
+                            To Prev Page
+                          </button>
+                        )}
+                        {pageIdx < paperPages.length - 1 && (
+                          <button
+                            onClick={() => handleTransferQuestionBetweenPages(pageIdx, pageIdx + 1)}
+                            className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-semibold flex items-center gap-0.5 border border-slate-700 transition-all"
+                            title={`Move last MCQ from Page ${page.pageNumber} to Page ${page.pageNumber + 1}`}
+                          >
+                            To Next Page
+                            <ArrowRight className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* A4 Sheet Container */}
@@ -1249,9 +1535,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
                       {/* 2-Column Boxed Questions Grid with Full Outer Border and Center Line */}
                       <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-1 overflow-hidden">
-                        {/* Left Column */}
-                        <div className="p-2 border-r-[1.5px] border-black flex flex-col justify-between h-full space-y-0.5 overflow-hidden">
-                          {page.col1.map((item) => {
+                        {/* Left Column (Uniform vertical spacing, no justify-between stretching) */}
+                        <div className="p-2 border-r-[1.5px] border-black flex flex-col justify-start space-y-1.5 overflow-hidden">
+                          {page.col1.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
                             const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
@@ -1263,20 +1549,75 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             return (
                               <div
                                 key={q.id || item.originalIndex}
-                                className={`text-[11px] leading-snug break-inside-avoid relative group ${
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Backspace' && (e.altKey || e.ctrlKey || e.metaKey)) {
+                                    e.preventDefault();
+                                    handleShiftQuestionBack(pageIdx, 1, itemIdx);
+                                  } else if (e.key === 'Enter' && (e.altKey || e.shiftKey || e.ctrlKey)) {
+                                    e.preventDefault();
+                                    handleShiftQuestionForward(pageIdx, 1, itemIdx);
+                                  }
+                                }}
+                                className={`text-[11px] leading-snug break-inside-avoid relative group border border-transparent hover:border-blue-300 hover:bg-blue-50/40 p-1 rounded transition-all focus:outline-none focus:ring-1 focus:ring-blue-500 ${
                                   density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
                                 }`}
                               >
-                                {isLiveEditMode && (
+                                {/* Manual Shift Actions (Backspace & Enter) Hover Toolbar */}
+                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity">
                                   <button
-                                    onClick={() => handleStartEditQuestion(item.originalIndex)}
-                                    className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 bg-blue-600 text-white p-1 rounded shadow text-[9px] flex items-center gap-0.5 z-20"
-                                    title="Edit Question"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleShiftQuestionBack(pageIdx, 1, itemIdx);
+                                    }}
+                                    disabled={pageIdx === 0 && itemIdx === 0}
+                                    title={pageIdx > 0 ? "Pull back to previous page" : "Already at beginning"}
+                                    className="hover:text-amber-300 disabled:opacity-30 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
                                   >
-                                    <Edit3 className="w-2.5 h-2.5" />
-                                    Edit
+                                    <CornerDownLeft className="w-2.5 h-2.5" />
+                                    <span>Backspace</span>
                                   </button>
-                                )}
+                                  <span className="text-slate-600">|</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleShiftQuestionForward(pageIdx, 1, itemIdx);
+                                    }}
+                                    title="Push to Right Column (Enter)"
+                                    className="hover:text-emerald-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                  >
+                                    <span>Enter</span>
+                                    <CornerDownRight className="w-2.5 h-2.5" />
+                                  </button>
+                                  <span className="text-slate-600">|</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handlePushBreakToNextPage(pageIdx, 1, itemIdx);
+                                    }}
+                                    title="Split Page from here"
+                                    className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                  >
+                                    <Scissors className="w-2.5 h-2.5" />
+                                    <span>Break</span>
+                                  </button>
+                                  {isLiveEditMode && (
+                                    <>
+                                      <span className="text-slate-600">|</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleStartEditQuestion(item.originalIndex);
+                                        }}
+                                        className="hover:text-blue-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                        title="Edit Full Question"
+                                      >
+                                        <Edit3 className="w-2.5 h-2.5" />
+                                        <span>Edit</span>
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
 
                                 <div className="font-bold text-black">
                                   <span>Q{qNum}. </span>
@@ -1284,6 +1625,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     <span
                                       contentEditable
                                       suppressContentEditableWarning
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                          e.preventDefault();
+                                          handleShiftQuestionBack(pageIdx, 1, itemIdx);
+                                        } else if (e.key === 'Enter' && e.altKey) {
+                                          e.preventDefault();
+                                          handleShiftQuestionForward(pageIdx, 1, itemIdx);
+                                        }
+                                      }}
                                       onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
                                       className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
                                     >
@@ -1331,9 +1681,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                           })}
                         </div>
 
-                        {/* Right Column */}
-                        <div className="p-2 flex flex-col justify-between h-full space-y-0.5 overflow-hidden">
-                          {page.col2.map((item) => {
+                        {/* Right Column (Uniform vertical spacing, no justify-between stretching) */}
+                        <div className="p-2 flex flex-col justify-start space-y-1.5 overflow-hidden">
+                          {page.col2.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
                             const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
@@ -1345,20 +1695,74 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             return (
                               <div
                                 key={q.id || item.originalIndex}
-                                className={`text-[11px] leading-snug break-inside-avoid relative group ${
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Backspace' && (e.altKey || e.ctrlKey || e.metaKey)) {
+                                    e.preventDefault();
+                                    handleShiftQuestionBack(pageIdx, 2, itemIdx);
+                                  } else if (e.key === 'Enter' && (e.altKey || e.shiftKey || e.ctrlKey)) {
+                                    e.preventDefault();
+                                    handleShiftQuestionForward(pageIdx, 2, itemIdx);
+                                  }
+                                }}
+                                className={`text-[11px] leading-snug break-inside-avoid relative group border border-transparent hover:border-blue-300 hover:bg-blue-50/40 p-1 rounded transition-all focus:outline-none focus:ring-1 focus:ring-blue-500 ${
                                   density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
                                 }`}
                               >
-                                {isLiveEditMode && (
+                                {/* Manual Shift Actions (Backspace & Enter) Hover Toolbar */}
+                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity">
                                   <button
-                                    onClick={() => handleStartEditQuestion(item.originalIndex)}
-                                    className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 bg-blue-600 text-white p-1 rounded shadow text-[9px] flex items-center gap-0.5 z-20"
-                                    title="Edit Question"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleShiftQuestionBack(pageIdx, 2, itemIdx);
+                                    }}
+                                    title="Pull back to Left Column (Backspace)"
+                                    className="hover:text-amber-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
                                   >
-                                    <Edit3 className="w-2.5 h-2.5" />
-                                    Edit
+                                    <CornerDownLeft className="w-2.5 h-2.5" />
+                                    <span>Backspace</span>
                                   </button>
-                                )}
+                                  <span className="text-slate-600">|</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleShiftQuestionForward(pageIdx, 2, itemIdx);
+                                    }}
+                                    title="Push to Next Page (Enter)"
+                                    className="hover:text-emerald-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                  >
+                                    <span>Enter</span>
+                                    <CornerDownRight className="w-2.5 h-2.5" />
+                                  </button>
+                                  <span className="text-slate-600">|</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handlePushBreakToNextPage(pageIdx, 2, itemIdx);
+                                    }}
+                                    title="Split Page from here"
+                                    className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                  >
+                                    <Scissors className="w-2.5 h-2.5" />
+                                    <span>Break</span>
+                                  </button>
+                                  {isLiveEditMode && (
+                                    <>
+                                      <span className="text-slate-600">|</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleStartEditQuestion(item.originalIndex);
+                                        }}
+                                        className="hover:text-blue-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                        title="Edit Full Question"
+                                      >
+                                        <Edit3 className="w-2.5 h-2.5" />
+                                        <span>Edit</span>
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
 
                                 <div className="font-bold text-black">
                                   <span>Q{qNum}. </span>
@@ -1366,6 +1770,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     <span
                                       contentEditable
                                       suppressContentEditableWarning
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                          e.preventDefault();
+                                          handleShiftQuestionBack(pageIdx, 2, itemIdx);
+                                        } else if (e.key === 'Enter' && e.altKey) {
+                                          e.preventDefault();
+                                          handleShiftQuestionForward(pageIdx, 2, itemIdx);
+                                        }
+                                      }}
                                       onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
                                       className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
                                     >
