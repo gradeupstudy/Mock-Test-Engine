@@ -309,34 +309,21 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
 
   // Calculation to detect if page content exceeds strict A4 boundary (297mm height / 1123px)
   const checkPageOverflow = (page: PaperPageLayout) => {
-    const maxSafeHeight = page.isFirstPage ? 860 : 980;
+    const maxSafeHeight = page.isFirstPage
+      ? (density === 'ultra-compact' ? 930 : density === 'normal' ? 840 : 890)
+      : (density === 'ultra-compact' ? 1040 : density === 'normal' ? 960 : 1010);
+
     const calcColHeight = (col: PaperPageQuestion[]) => {
-      return col.reduce((sum, item) => {
-        const q = item.question;
-        const qLen = (q.question || '').length;
-        const transLen = (q.translation || '').length;
-        let h = 30; // base question title
-        if (qLen > 65) h += 16;
-        if (qLen > 130) h += 16;
-        if (shouldDisplayTranslation(q.question, q.translation)) {
-          h += 16;
-          if (transLen > 65) h += 16;
-        }
-        const isShort = (q.optionA || '').length < 24 && (q.optionB || '').length < 24 && (q.optionC || '').length < 24 && (q.optionD || '').length < 24;
-        if (isShort) {
-          h += 28;
-        } else {
-          h += 56;
-        }
-        h += (density === 'ultra-compact' ? 8 : density === 'normal' ? 16 : 12);
-        return sum + h;
-      }, 0);
+      return col.reduce((sum, item) => sum + estimateQuestionRenderHeight(item.question, density, item.splitType), 0);
     };
 
     const col1H = calcColHeight(page.col1);
     const col2H = calcColHeight(page.col2);
     const maxH = Math.max(col1H, col2H);
-    const maxItemLimit = page.isFirstPage ? 18 : 22;
+    const maxItemLimit = page.isFirstPage
+      ? (density === 'ultra-compact' ? 28 : density === 'normal' ? 20 : 26)
+      : (density === 'ultra-compact' ? 36 : density === 'normal' ? 26 : 32);
+
     const isOverflow = maxH > maxSafeHeight || (page.col1.length + page.col2.length > maxItemLimit);
     
     return {
@@ -780,6 +767,48 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
     });
   };
 
+  // Quick Target Page Count Preset Handler
+  const handleSetTargetPages = (targetPages: number) => {
+    const totalN = activeQuestions.length;
+    if (totalN <= 0 || targetPages <= 0) return;
+
+    setCustomPages(null);
+
+    if (targetPages === 1) {
+      setIsManualCapacity(true);
+      setAutoBalance(false);
+      setManualPage1Cap(totalN);
+      setManualOtherCap(totalN);
+      if (totalN > 24) setDensity('ultra-compact');
+      return;
+    }
+
+    // Distribute across target pages
+    let p1 = Math.floor(totalN / targetPages);
+    if (p1 % 2 !== 0) p1 += 1;
+    p1 = Math.min(24, Math.max(8, p1 - 2));
+    if (p1 % 2 !== 0) p1 += 1;
+
+    const remaining = totalN - p1;
+    const numOthers = targetPages - 1;
+    let other = Math.ceil(remaining / numOthers);
+    if (other % 2 !== 0) other += 1;
+    other = Math.min(34, Math.max(10, other));
+
+    setIsManualCapacity(true);
+    setAutoBalance(false);
+    setManualPage1Cap(p1);
+    setManualOtherCap(other);
+
+    if (other > 28 || p1 > 22) {
+      setDensity('ultra-compact');
+    } else if (other <= 22 && p1 <= 16) {
+      setDensity('normal');
+    } else {
+      setDensity('compact');
+    }
+  };
+
   // Export Triggers
   const handleDownloadPaperPdf = async () => {
     setIsExporting(true);
@@ -1139,6 +1168,99 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
               <div className="text-[10px] text-emerald-400/90 flex items-center gap-1 font-mono pt-1">
                 <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
                 <span>100% Text Protected (Questions/Options unmodified)</span>
+              </div>
+            </div>
+
+            {/* Quick Target Page Count Preset Selector */}
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-blue-400" />
+                  Target Total Pages:
+                </span>
+                <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                  {totalPages} {totalPages === 1 ? 'Page' : 'Pages'} Active
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 pt-1">
+                <button
+                  onClick={() => {
+                    setCustomPages(null);
+                    setAutoBalance(true);
+                    setIsManualCapacity(false);
+                  }}
+                  className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                    autoBalance && !isManualCapacity
+                      ? 'bg-emerald-600/30 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500'
+                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                  }`}
+                  title="Automatically calculate best page fit"
+                >
+                  ⚡ Auto
+                </button>
+                {activeQuestions.length >= 70 && (
+                  <button
+                    onClick={() => handleSetTargetPages(3)}
+                    className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                      isManualCapacity && totalPages === 3
+                        ? 'bg-blue-600/30 border-blue-500 text-blue-300 ring-1 ring-blue-500'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="Fit entire paper into exactly 3 Pages (Ultra-Compact)"
+                  >
+                    3 Pages
+                  </button>
+                )}
+                {activeQuestions.length >= 50 && (
+                  <button
+                    onClick={() => handleSetTargetPages(4)}
+                    className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                      isManualCapacity && totalPages === 4
+                        ? 'bg-blue-600/30 border-blue-500 text-blue-300 ring-1 ring-blue-500'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="Fit entire paper into exactly 4 Pages (Balanced)"
+                  >
+                    4 Pages
+                  </button>
+                )}
+                {activeQuestions.length >= 70 && (
+                  <button
+                    onClick={() => handleSetTargetPages(5)}
+                    className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                      isManualCapacity && totalPages === 5
+                        ? 'bg-blue-600/30 border-blue-500 text-blue-300 ring-1 ring-blue-500'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                    }`}
+                    title="Fit entire paper into exactly 5 Pages (Spacious)"
+                  >
+                    5 Pages
+                  </button>
+                )}
+                {activeQuestions.length < 50 && (
+                  <>
+                    <button
+                      onClick={() => handleSetTargetPages(1)}
+                      className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                        isManualCapacity && totalPages === 1
+                          ? 'bg-blue-600/30 border-blue-500 text-blue-300 ring-1 ring-blue-500'
+                          : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      1 Page
+                    </button>
+                    <button
+                      onClick={() => handleSetTargetPages(2)}
+                      className={`py-1.5 px-1 rounded-md text-[11px] font-bold border transition-all text-center ${
+                        isManualCapacity && totalPages === 2
+                          ? 'bg-blue-600/30 border-blue-500 text-blue-300 ring-1 ring-blue-500'
+                          : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      2 Pages
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 

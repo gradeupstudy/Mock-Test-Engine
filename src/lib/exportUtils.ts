@@ -1600,11 +1600,10 @@ export function getRecommendedPageCapacities(
   totalQuestions: number,
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
 ): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
-  // Page 1 has Logo + Exam Header + General Instructions Box (~220px vertical space)
-  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~30px space)
-  // Physical maximum capacities that safely fit within A4 height without overflowing:
-  const maxP1 = density === 'ultra-compact' ? 22 : density === 'normal' ? 16 : 20;
-  const maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
+  // Page 1 has Logo + Exam Header + General Instructions Box (~180px vertical space)
+  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~28px space)
+  const maxP1 = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 24;
+  const maxOther = density === 'ultra-compact' ? 34 : density === 'normal' ? 24 : 30;
 
   if (totalQuestions <= 0) {
     return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
@@ -1614,27 +1613,71 @@ export function getRecommendedPageCapacities(
     return { p1Capacity: totalQuestions, otherCapacity: maxOther, estimatedPages: 1 };
   }
 
+  // Calculate target page count
+  // E.g., for 100 questions in compact: (100 - 22) / 26 = 78 / 26 = 3 other pages -> 4 pages total!
   const remainingAfterP1 = totalQuestions - maxP1;
   const numOtherPages = Math.ceil(remainingAfterP1 / maxOther);
   const totalPages = 1 + numOtherPages;
 
-  let p1 = maxP1;
-  if (p1 % 2 !== 0 && p1 + 1 <= maxP1) {
-    p1 += 1;
+  // Calculate evenly balanced capacities
+  let targetP1 = Math.floor(totalQuestions / totalPages);
+  if (totalPages > 1) {
+    targetP1 = Math.max(8, targetP1 - (targetP1 % 2 !== 0 ? 1 : 2));
   }
-  const otherPagesRemaining = totalQuestions - p1;
-  let perOtherPage = Math.ceil(otherPagesRemaining / numOtherPages);
-  if (perOtherPage % 2 !== 0 && perOtherPage + 1 <= maxOther) {
-    perOtherPage += 1;
+  if (targetP1 > maxP1) targetP1 = maxP1;
+  if (targetP1 % 2 !== 0 && targetP1 + 1 <= maxP1) targetP1 += 1;
+
+  const remaining = totalQuestions - targetP1;
+  let targetOther = Math.ceil(remaining / numOtherPages);
+  if (targetOther > maxOther) targetOther = maxOther;
+  if (targetOther % 2 !== 0 && targetOther + 1 <= maxOther) targetOther += 1;
+
+  return { p1Capacity: targetP1, otherCapacity: targetOther, estimatedPages: totalPages };
+}
+
+/**
+ * Intelligent Column Height Balancer:
+ * Splits a list of questions into Column 1 and Column 2 such that:
+ * 1. Question numbers remain strictly sequential (Q1..Qk in Col 1, Qk+1..Qn in Col 2).
+ * 2. The height difference |col1Height - col2Height| is strictly minimized so both columns
+ *    finish at the exact same vertical baseline at the bottom of the A4 box!
+ */
+export function balancePageColumns(items: PaperPageQuestion[]): { col1: PaperPageQuestion[]; col2: PaperPageQuestion[] } {
+  if (!items || items.length === 0) return { col1: [], col2: [] };
+  if (items.length === 1) return { col1: [items[0]], col2: [] };
+
+  const totalH = items.reduce((sum, it) => sum + it.estimatedHeight, 0);
+  const n = items.length;
+
+  let bestK = Math.ceil(n / 2);
+  let minDiff = Infinity;
+
+  let runningSum = 0;
+  for (let k = 1; k < n; k++) {
+    runningSum += items[k - 1].estimatedHeight;
+    const col2H = totalH - runningSum;
+    const diff = Math.abs(runningSum - col2H);
+
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestK = k;
+    } else if (diff === minDiff) {
+      if (Math.abs(k - n / 2) < Math.abs(bestK - n / 2)) {
+        bestK = k;
+      }
+    }
   }
 
-  return { p1Capacity: p1, otherCapacity: perOtherPage, estimatedPages: totalPages };
+  return {
+    col1: items.slice(0, bestK),
+    col2: items.slice(bestK)
+  };
 }
 
 /**
  * Precision Question-to-Page Layout Engine:
- * Height-aware pagination engine that guarantees zero A4 page overflow.
- * Accounts for passages, multiline questions, bilingual translations, and option line wrapping.
+ * Height-aware pagination engine that guarantees zero A4 page overflow and eliminates
+ * bottom blank spacing by evenly distributing MCQs across balanced target pages.
  */
 export function paginateQuestionsFor2ColPaper(
   questions: Question[],
@@ -1653,89 +1696,138 @@ export function paginateQuestionsFor2ColPaper(
 
   const totalN = questions.length;
   // Maximum safe column height limits (in pixels at 96 DPI):
-  // Page 1 available column height = 1123px - (padding 50px + header 180px + footer 30px) = ~860px
-  // Other pages available column height = 1123px - (padding 50px + header 40px + footer 30px) = ~1000px
-  const MAX_P1_COL_HEIGHT = density === 'ultra-compact' ? 880 : density === 'normal' ? 820 : 850;
-  const MAX_OTHER_COL_HEIGHT = density === 'ultra-compact' ? 1020 : density === 'normal' ? 950 : 980;
+  const MAX_P1_COL_HEIGHT = density === 'ultra-compact' ? 930 : density === 'normal' ? 840 : 890;
+  const MAX_OTHER_COL_HEIGHT = density === 'ultra-compact' ? 1040 : density === 'normal' ? 960 : 1010;
 
-  // Safe numerical question caps per page
-  const maxP1Count = density === 'ultra-compact' ? 24 : density === 'normal' ? 16 : 20;
+  const maxP1Count = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 24;
   const maxOtherCount = density === 'ultra-compact' ? 34 : density === 'normal' ? 24 : 30;
 
   const pages: PaperPageLayout[] = [];
   let remainingItems = [...itemsWithHeight];
   let pageNum = 1;
 
-  while (remainingItems.length > 0) {
-    const isFirst = pageNum === 1;
-    const maxColHeight = isFirst ? MAX_P1_COL_HEIGHT : MAX_OTHER_COL_HEIGHT;
-    const maxItemsForPage = isFirst
-      ? (page1CapOverride && page1CapOverride > 0 ? page1CapOverride : maxP1Count)
-      : (otherCapOverride && otherCapOverride > 0 ? otherCapOverride : maxOtherCount);
+  const hasManualCaps = !!(page1CapOverride && otherCapOverride && page1CapOverride > 0 && otherCapOverride > 0);
 
-    // If manual cap override is provided, we respect the question count cap
-    // while strictly guarding against height overflow.
-    let pageItems: PaperPageQuestion[] = [];
-    
-    if (page1CapOverride && otherCapOverride && page1CapOverride > 0 && otherCapOverride > 0) {
-      const takeCount = Math.min(remainingItems.length, maxItemsForPage);
-      pageItems = remainingItems.splice(0, takeCount);
+  if (hasManualCaps) {
+    while (remainingItems.length > 0) {
+      const isFirst = pageNum === 1;
+      const targetCount = isFirst ? page1CapOverride! : otherCapOverride!;
+      const takeCount = Math.min(remainingItems.length, targetCount);
+      const pageItems = remainingItems.splice(0, takeCount);
+
+      const { col1, col2 } = balancePageColumns(pageItems);
+
+      pages.push({
+        pageNumber: pageNum,
+        totalPages: 1,
+        isFirstPage: isFirst,
+        col1,
+        col2,
+        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
+      });
+      pageNum++;
+    }
+  } else if (autoBalance) {
+    // SMART EVEN PAGE BALANCER (Zero Bottom Waste & No Starved Tail)
+    const rec = getRecommendedPageCapacities(totalN, density);
+    const targetPages = Math.max(1, rec.estimatedPages);
+
+    const pageQuotas: number[] = [];
+    if (targetPages === 1) {
+      pageQuotas.push(totalN);
     } else {
-      // Dynamic Height & Content Density Packing:
-      // Greedily collect questions that safely fit within 2 columns of height maxColHeight
-      let col1H = 0;
-      let col2H = 0;
+      let p1 = Math.min(maxP1Count, rec.p1Capacity);
+      if (p1 % 2 !== 0 && p1 + 1 <= maxP1Count) p1 += 1;
+      pageQuotas.push(p1);
+
+      const remainingForOthers = totalN - p1;
+      const numOther = targetPages - 1;
+      const baseOther = Math.floor(remainingForOthers / numOther);
+      const extra = remainingForOthers % numOther;
+
+      for (let p = 0; p < numOther; p++) {
+        const count = baseOther + (p < extra ? 1 : 0);
+        pageQuotas.push(count);
+      }
+    }
+
+    for (let pIdx = 0; pIdx < pageQuotas.length; pIdx++) {
+      if (remainingItems.length === 0) break;
+      const isFirst = pIdx === 0;
+      const quota = pageQuotas[pIdx];
+      const takeCount = Math.min(remainingItems.length, quota);
+      const pageItems = remainingItems.splice(0, takeCount);
+
+      const { col1, col2 } = balancePageColumns(pageItems);
+
+      pages.push({
+        pageNumber: pIdx + 1,
+        totalPages: targetPages,
+        isFirstPage: isFirst,
+        col1,
+        col2,
+        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
+      });
+    }
+
+    while (remainingItems.length > 0) {
+      const takeCount = Math.min(remainingItems.length, maxOtherCount);
+      const pageItems = remainingItems.splice(0, takeCount);
+      const { col1, col2 } = balancePageColumns(pageItems);
+      pages.push({
+        pageNumber: pages.length + 1,
+        totalPages: pages.length + 1,
+        isFirstPage: false,
+        col1,
+        col2,
+        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
+      });
+    }
+  } else {
+    // Greedy packing by height limit
+    while (remainingItems.length > 0) {
+      const isFirst = pageNum === 1;
+      const maxColHeight = isFirst ? MAX_P1_COL_HEIGHT : MAX_OTHER_COL_HEIGHT;
+      const maxItemsForPage = isFirst ? maxP1Count : maxOtherCount;
+
+      let currentH = 0;
       let count = 0;
       const currentBatch: PaperPageQuestion[] = [];
 
       for (let i = 0; i < remainingItems.length; i++) {
         if (count >= maxItemsForPage) break;
         const item = remainingItems[i];
-        
-        // Try placing in col 1 or col 2
-        if (col1H <= col2H) {
-          if (col1H + item.estimatedHeight <= maxColHeight || count === 0) {
-            col1H += item.estimatedHeight;
-            currentBatch.push(item);
-            count++;
-          } else {
-            break;
-          }
+        if (currentH + item.estimatedHeight <= maxColHeight * 2 || count === 0) {
+          currentH += item.estimatedHeight;
+          currentBatch.push(item);
+          count++;
         } else {
-          if (col2H + item.estimatedHeight <= maxColHeight) {
-            col2H += item.estimatedHeight;
-            currentBatch.push(item);
-            count++;
-          } else {
-            break;
-          }
+          break;
         }
       }
 
-      // If nothing could fit (extreme edge case), take at least 1 item
       if (currentBatch.length === 0 && remainingItems.length > 0) {
         currentBatch.push(remainingItems[0]);
       }
 
-      pageItems = remainingItems.splice(0, currentBatch.length);
+      const pageItems = remainingItems.splice(0, currentBatch.length);
+      const { col1, col2 } = balancePageColumns(pageItems);
+
+      pages.push({
+        pageNumber: pageNum,
+        totalPages: 1,
+        isFirstPage: isFirst,
+        col1,
+        col2,
+        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
+      });
+
+      pageNum++;
     }
-
-    // Split pageItems into Column 1 and Column 2 evenly
-    const half = Math.ceil(pageItems.length / 2);
-    const col1 = pageItems.slice(0, half);
-    const col2 = pageItems.slice(half);
-
-    pages.push({
-      pageNumber: pageNum,
-      totalPages: 1, // updated below
-      isFirstPage: isFirst,
-      col1,
-      col2,
-      col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
-      col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
-    });
-
-    pageNum++;
   }
 
   const finalTotalPages = Math.max(1, pages.length);
