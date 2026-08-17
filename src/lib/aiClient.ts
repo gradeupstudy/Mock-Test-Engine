@@ -1913,18 +1913,32 @@ export async function optimizePrintLayoutWithAi(
     density = 'compact';
   }
 
-  let p1Cap = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 22;
-  let otherCap = density === 'ultra-compact' ? 30 : density === 'normal' ? 22 : 26;
+  let maxP1Cap = density === 'ultra-compact' ? 24 : density === 'normal' ? 18 : 22;
+  let maxOtherCap = density === 'ultra-compact' ? 38 : density === 'normal' ? 26 : 34;
 
-  let estPages = 1;
-  if (total > p1Cap) {
-    estPages = 1 + Math.ceil((total - p1Cap) / otherCap);
+  if (avgChars > 200) {
+    maxP1Cap = Math.max(16, Math.floor(maxP1Cap * 0.85));
+    maxOtherCap = Math.max(24, Math.floor(maxOtherCap * 0.85));
   }
 
-  if (estPages > 1) {
-    const perPageAvg = Math.ceil(total / estPages);
-    p1Cap = Math.max(10, Math.min(p1Cap, perPageAvg));
-    otherCap = Math.max(12, Math.min(otherCap, perPageAvg + 2));
+  let estPages = 1;
+  let p1Cap = total;
+  let otherCap = maxOtherCap;
+
+  if (total <= maxP1Cap) {
+    estPages = 1;
+    p1Cap = total;
+  } else {
+    const remaining = total - maxP1Cap;
+    const numOther = Math.ceil(remaining / maxOtherCap);
+    estPages = 1 + numOther;
+
+    p1Cap = maxP1Cap;
+    if (p1Cap % 2 !== 0 && p1Cap + 1 <= maxP1Cap) p1Cap += 1;
+
+    const remainingQs = total - p1Cap;
+    otherCap = Math.ceil(remainingQs / numOther);
+    if (otherCap % 2 !== 0 && otherCap + 1 <= maxOtherCap) otherCap += 1;
   }
 
   return {
@@ -1934,7 +1948,7 @@ export async function optimizePrintLayoutWithAi(
     recommendedOtherCap: otherCap,
     estimatedPages: estPages,
     fillRateScore: 96,
-    summaryMessage: `AI Auto-Fix: ${total} प्रश्न पूर्ण ${estPages} A4 पृष्ठों में बिना किसी रिक्त स्थान के संतुलित किए गए हैं। (MCQs का मूल टेक्स्ट 100% सुरक्षित है)`,
+    summaryMessage: `AI Auto-Fix: ${total} प्रश्न पूर्ण ${estPages} A4 पृष्ठों में बिना किसी रिक्त स्थान के संतुलित किए गए हैं। (Page 1 पर निर्देश बॉक्स के साथ ${p1Cap} MCQs, और शेष पृष्ठों पर ${otherCap} MCQs)`,
     contentIntegrityGuarantee: true
   };
 }

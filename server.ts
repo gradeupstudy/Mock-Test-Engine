@@ -2116,28 +2116,44 @@ app.post("/api/gemini/optimize-print-layout", async (req, res) => {
 
   // Algorithmic optimal estimation
   let optimalDensity: "ultra-compact" | "compact" | "normal" = "compact";
-  if (totalQuestions >= 80 || avgCharsPerQuestion < 120) {
+  if (totalQuestions >= 75 || avgCharsPerQuestion < 130) {
     optimalDensity = "ultra-compact";
-  } else if (totalQuestions <= 30 && avgCharsPerQuestion > 250) {
+  } else if (totalQuestions <= 25 && avgCharsPerQuestion > 240) {
     optimalDensity = "normal";
   } else {
     optimalDensity = "compact";
   }
 
-  // Calculate capacities based on density
-  let p1Cap = optimalDensity === "ultra-compact" ? 26 : optimalDensity === "normal" ? 18 : 22;
-  let otherCap = optimalDensity === "ultra-compact" ? 30 : optimalDensity === "normal" ? 22 : 26;
+  // Page 1 has Logo + Header + General Instructions Box (~240px vertical space)
+  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~25px space)
+  // Realistic physical capacities for A4 2-Column format:
+  let maxP1Cap = optimalDensity === "ultra-compact" ? 24 : optimalDensity === "normal" ? 18 : 22;
+  let maxOtherCap = optimalDensity === "ultra-compact" ? 38 : optimalDensity === "normal" ? 26 : 34;
 
-  let estimatedPages = 1;
-  if (totalQuestions > p1Cap) {
-    estimatedPages = 1 + Math.ceil((totalQuestions - p1Cap) / otherCap);
+  if (avgCharsPerQuestion > 200 || hasTranslationCount > totalQuestions * 0.5) {
+    // If questions are lengthy or bilingual, scale down capacity
+    maxP1Cap = Math.max(16, Math.floor(maxP1Cap * 0.85));
+    maxOtherCap = Math.max(24, Math.floor(maxOtherCap * 0.85));
   }
 
-  // Balance capacities if more than 1 page
-  if (estimatedPages > 1) {
-    const perPageAverage = Math.ceil(totalQuestions / estimatedPages);
-    p1Cap = Math.max(12, Math.min(p1Cap, perPageAverage));
-    otherCap = Math.max(14, Math.min(otherCap, perPageAverage + 2));
+  let estimatedPages = 1;
+  let p1Cap = totalQuestions;
+  let otherCap = maxOtherCap;
+
+  if (totalQuestions <= maxP1Cap) {
+    estimatedPages = 1;
+    p1Cap = totalQuestions;
+  } else {
+    const remaining = totalQuestions - maxP1Cap;
+    const numOther = Math.ceil(remaining / maxOtherCap);
+    estimatedPages = 1 + numOther;
+
+    p1Cap = maxP1Cap;
+    if (p1Cap % 2 !== 0 && p1Cap + 1 <= maxP1Cap) p1Cap += 1;
+
+    const remainingQs = totalQuestions - p1Cap;
+    otherCap = Math.ceil(remainingQs / numOther);
+    if (otherCap % 2 !== 0 && otherCap + 1 <= maxOtherCap) otherCap += 1;
   }
 
   try {
@@ -2146,16 +2162,18 @@ app.post("/api/gemini/optimize-print-layout", async (req, res) => {
 - Average characters per MCQ: ${avgCharsPerQuestion}
 - Questions with short options (suitable for 2x2 option grid): ${shortOptCount} (${Math.round(shortOptRatio * 100)}%)
 - Questions with Hindi/Bilingual translation: ${hasTranslationCount}
-- Target: Fit all questions into minimum full A4 sheets with 90-98% page utilization and ZERO blank gaps.
+- Page 1 vertical structure: Top Logo + Test Title + Time/Marks Bar + General Instructions Box (takes ~240px). Page 1 MCQ capacity is ~${maxP1Cap} MCQs.
+- Subsequent Pages (Page 2, 3, etc.) structure: NO logo, NO instructions box, only 1-line top header. Subsequent pages MCQ capacity is ~${maxOtherCap} MCQs (much higher than Page 1).
+- Target: Fit all questions into minimum full A4 sheets with 90-98% page utilization and ZERO blank space on all pages (Page 1 AND remaining pages).
 - CRITICAL DIRECTIVE: ZERO alterations to question wording, options, answers, or language content. This is purely visual layout optimization.
 
 Output a JSON object with:
 - "recommendedDensity": "ultra-compact" | "compact" | "normal"
-- "recommendedPage1Cap": number
-- "recommendedOtherCap": number
+- "recommendedPage1Cap": number (between 16 and 26)
+- "recommendedOtherCap": number (between 26 and 42)
 - "estimatedPages": number
-- "fillRateScore": number (85 to 98)
-- "summaryMessage": string (brief student-friendly explanation in Hindi/English explaining why this layout eliminates wasted blank space without altering any text)
+- "fillRateScore": number (88 to 99)
+- "summaryMessage": string (brief explanation in Hindi/English explaining how Page 1 instructions vs subsequent full pages are balanced to eliminate bottom empty space)
 - "contentIntegrityGuarantee": true`;
 
     const systemInstruction = "You are an expert A4 exam publishing typesetter and layout engine. Return valid JSON strictly.";

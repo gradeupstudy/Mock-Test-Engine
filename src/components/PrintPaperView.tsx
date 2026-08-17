@@ -1250,7 +1250,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       {/* 2-Column Boxed Questions Grid with Full Outer Border and Center Line */}
                       <div className="relative z-10 border-[1.5px] border-black grid grid-cols-2 bg-transparent text-black flex-1 min-h-0 my-2">
                         {/* Left Column */}
-                        <div className="p-2.5 border-r-[1.5px] border-black space-y-2">
+                        <div className="p-2.5 border-r-[1.5px] border-black flex flex-col justify-between h-full space-y-1">
                           {page.col1.map((item) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
@@ -1332,7 +1332,7 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                         </div>
 
                         {/* Right Column */}
-                        <div className="p-2.5 space-y-2">
+                        <div className="p-2.5 flex flex-col justify-between h-full space-y-1">
                           {page.col2.map((item) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;

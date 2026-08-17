@@ -1486,8 +1486,11 @@ export function getRecommendedPageCapacities(
   totalQuestions: number,
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
 ): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
-  let maxP1 = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 22;
-  let maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
+  // Page 1 has Logo + Exam Header + General Instructions Box (~240px vertical space)
+  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~25px space)
+  // Realistic physical capacities for A4 2-Column format:
+  const maxP1 = density === 'ultra-compact' ? 24 : density === 'normal' ? 18 : 22;
+  const maxOther = density === 'ultra-compact' ? 38 : density === 'normal' ? 26 : 34;
 
   if (totalQuestions <= 0) {
     return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
@@ -1501,20 +1504,16 @@ export function getRecommendedPageCapacities(
   const numOtherPages = Math.ceil(remainingAfterP1 / maxOther);
   const totalPages = 1 + numOtherPages;
 
-  if (totalPages === 2) {
-    let p1 = Math.min(maxP1, Math.round(totalQuestions * 0.46));
-    if (p1 % 2 !== 0 && p1 + 1 <= maxP1) {
-      p1 += 1;
-    }
-    const other = totalQuestions - p1;
-    return { p1Capacity: p1, otherCapacity: other, estimatedPages: 2 };
+  let p1 = maxP1;
+  if (p1 % 2 !== 0 && p1 + 1 <= maxP1) {
+    p1 += 1;
+  }
+  const otherPagesRemaining = totalQuestions - p1;
+  let perOtherPage = Math.ceil(otherPagesRemaining / numOtherPages);
+  if (perOtherPage % 2 !== 0 && perOtherPage + 1 <= maxOther) {
+    perOtherPage += 1;
   }
 
-  const p1Ratio = maxP1 / (maxP1 + (totalPages - 1) * maxOther);
-  let p1 = Math.min(maxP1, Math.max(14, Math.round(totalQuestions * p1Ratio)));
-  if (p1 % 2 !== 0 && p1 + 1 <= maxP1) p1 += 1;
-  const otherPagesRemaining = totalQuestions - p1;
-  const perOtherPage = Math.ceil(otherPagesRemaining / (totalPages - 1));
   return { p1Capacity: p1, otherCapacity: perOtherPage, estimatedPages: totalPages };
 }
 
@@ -1539,8 +1538,10 @@ export function paginateQuestionsFor2ColPaper(
   }));
 
   const totalN = questions.length;
-  const maxP1 = density === 'ultra-compact' ? 26 : density === 'normal' ? 18 : 22;
-  const maxOther = density === 'ultra-compact' ? 32 : density === 'normal' ? 22 : 28;
+  // Page 1 has Logo + Header + General Instructions Box (~240px vertical space)
+  // Subsequent pages (Page 2, 3, 4...) have ONLY 1-line top header (~25px space)
+  const maxP1 = density === 'ultra-compact' ? 24 : density === 'normal' ? 18 : 22;
+  const maxOther = density === 'ultra-compact' ? 38 : density === 'normal' ? 26 : 34;
 
   // Determine page counts array
   let pageQuestionCounts: number[] = [];
@@ -1560,28 +1561,22 @@ export function paginateQuestionsFor2ColPaper(
     if (totalN <= maxP1) {
       pageQuestionCounts = [totalN];
     } else {
-      const totalPages = 1 + Math.ceil((totalN - maxP1) / maxOther);
-      if (totalPages === 2) {
-        let p1Count = Math.min(maxP1, Math.floor(totalN * 0.46));
-        if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
-        const p2Count = totalN - p1Count;
-        pageQuestionCounts = [p1Count, p2Count];
-      } else {
-        const p1Ratio = maxP1 / (maxP1 + (totalPages - 1) * maxOther);
-        let p1Count = Math.min(maxP1, Math.max(14, Math.round(totalN * p1Ratio)));
-        if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
+      const remainingAfterP1 = totalN - maxP1;
+      const numOther = Math.ceil(remainingAfterP1 / maxOther);
+      const totalPages = 1 + numOther;
 
-        const remainingQs = totalN - p1Count;
-        const numOther = totalPages - 1;
-        const perOther = Math.floor(remainingQs / numOther);
-        let extra = remainingQs % numOther;
+      let p1Count = maxP1;
+      if (p1Count % 2 !== 0 && p1Count + 1 <= maxP1) p1Count += 1;
 
-        pageQuestionCounts = [p1Count];
-        for (let i = 0; i < numOther; i++) {
-          let count = perOther + (extra > 0 ? 1 : 0);
-          if (extra > 0) extra--;
-          pageQuestionCounts.push(count);
-        }
+      const remainingQs = totalN - p1Count;
+      const perOther = Math.floor(remainingQs / numOther);
+      let extra = remainingQs % numOther;
+
+      pageQuestionCounts = [p1Count];
+      for (let i = 0; i < numOther; i++) {
+        let count = perOther + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra--;
+        pageQuestionCounts.push(count);
       }
     }
   }
@@ -1791,11 +1786,11 @@ export async function exportCompact2ColPdfTestPaper(
           <!-- 2-Column Boxed Layout with Outer Border on all 4 sides and Center Line -->
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 6px;">
             <!-- Left Column -->
-            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000;">
+            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
               ${renderColumnItems(page.col1)}
             </div>
             <!-- Right Column -->
-            <div style="padding: 8px 8px 8px 10px;">
+            <div style="padding: 8px 8px 8px 10px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
@@ -2132,10 +2127,10 @@ export async function exportCombinedBookletPdf(
           </div>
 
           <div style="border: 1.5px solid #000000; display: grid; grid-template-columns: 1fr 1fr; background: transparent; flex: 1; min-height: 0; margin-bottom: 6px;">
-            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000;">
+            <div style="padding: 8px 10px 8px 8px; border-right: 1.5px solid #000000; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
               ${renderColumnItems(page.col1)}
             </div>
-            <div style="padding: 8px 8px 8px 10px;">
+            <div style="padding: 8px 8px 8px 10px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box;">
               ${renderColumnItems(page.col2)}
             </div>
           </div>
@@ -2486,9 +2481,19 @@ export function printNativeCompact2ColPaper(
         .left-col {
           padding: 6px 8px;
           border-right: 1.5px solid #000;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          height: 100%;
+          box-sizing: border-box;
         }
         .right-col {
           padding: 6px 8px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          height: 100%;
+          box-sizing: border-box;
         }
         .page-footer {
           border-top: 1px solid #000;
