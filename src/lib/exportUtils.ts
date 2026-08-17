@@ -1201,6 +1201,7 @@ export interface BookletCustomConfig {
 export interface PaperPageQuestion {
   question: Question;
   originalIndex: number;
+  estimatedHeight: number;
 }
 
 export interface PaperPageLayout {
@@ -1209,27 +1210,70 @@ export interface PaperPageLayout {
   isFirstPage: boolean;
   col1: PaperPageQuestion[];
   col2: PaperPageQuestion[];
+  col1Height: number;
+  col2Height: number;
 }
 
 /**
- * Calculates optimal capacity recommendations for A4 paper.
- * Eliminates orphan bottom whitespace and avoids unnecessary extra pages.
+ * Accurately estimates rendered height (in pixels) for a question in 2-column A4 format.
+ * Accounts for question text length, translation presence, option lengths (2x2 vs 4 stacked), and density.
+ */
+export function estimateQuestionRenderHeight(
+  q: Question,
+  density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
+): number {
+  const isUltra = density === 'ultra-compact';
+  const isNormal = density === 'normal';
+
+  const fontLineHeight = isUltra ? 14 : isNormal ? 17 : 15.5;
+  const optLineHeight = isUltra ? 13 : isNormal ? 16 : 14.5;
+  const qMargin = isUltra ? 6 : isNormal ? 10 : 8;
+
+  // In 2-column A4 layout with ~340px column width:
+  // English text fits ~42-46 chars per line, Hindi fits ~36-40 chars per line
+  const qText = q.question || '';
+  const qLines = Math.max(1, Math.ceil(qText.length / 44));
+  let height = qLines * fontLineHeight + 2;
+
+  // Hindi Translation
+  if (shouldDisplayTranslation(qText, q.translation)) {
+    const tText = q.translation || '';
+    const tLines = Math.max(1, Math.ceil(tText.length / 38));
+    height += tLines * (fontLineHeight * 0.95) + 3;
+  }
+
+  // Options layout (2x2 grid vs 4 stacked lines)
+  const optA = (q.optionA || '');
+  const optB = (q.optionB || '');
+  const optC = (q.optionC || '');
+  const optD = (q.optionD || '');
+  const isShort = optA.length < 22 && optB.length < 22 && optC.length < 22 && optD.length < 22;
+
+  if (isShort) {
+    // 2 rows of options
+    height += 2 * optLineHeight + 4;
+  } else {
+    // 4 rows of options
+    const optALines = Math.max(1, Math.ceil(optA.length / 42));
+    const optBLines = Math.max(1, Math.ceil(optB.length / 42));
+    const optCLines = Math.max(1, Math.ceil(optC.length / 42));
+    const optDLines = Math.max(1, Math.ceil(optD.length / 42));
+    height += (optALines + optBLines + optCLines + optDLines) * optLineHeight + 4;
+  }
+
+  height += qMargin;
+  return Math.ceil(height);
+}
+
+/**
+ * Calculates optimal capacity recommendations for A4 paper based on actual question content height.
  */
 export function getRecommendedPageCapacities(
   totalQuestions: number,
   density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
 ): { p1Capacity: number; otherCapacity: number; estimatedPages: number } {
-  // Base realistic max capacities
-  let maxP1 = 20;
-  let maxOther = 26;
-
-  if (density === 'ultra-compact') {
-    maxP1 = 24;
-    maxOther = 30;
-  } else if (density === 'normal') {
-    maxP1 = 16;
-    maxOther = 20;
-  }
+  let maxP1 = density === 'ultra-compact' ? 28 : density === 'normal' ? 18 : 24;
+  let maxOther = density === 'ultra-compact' ? 34 : density === 'normal' ? 22 : 28;
 
   if (totalQuestions <= 0) {
     return { p1Capacity: maxP1, otherCapacity: maxOther, estimatedPages: 0 };
@@ -1239,23 +1283,19 @@ export function getRecommendedPageCapacities(
     return { p1Capacity: totalQuestions, otherCapacity: maxOther, estimatedPages: 1 };
   }
 
-  // Calculate minimum pages needed
   const remainingAfterP1 = totalQuestions - maxP1;
   const numOtherPages = Math.ceil(remainingAfterP1 / maxOther);
   const totalPages = 1 + numOtherPages;
 
-  // Proportional balanced distribution for 2 pages
-  // Page 1 has ~45% usable height of total 2 pages (due to top header & instructions)
   if (totalPages === 2) {
     let p1 = Math.min(maxP1, Math.round(totalQuestions * 0.46));
     if (p1 % 2 !== 0 && p1 + 1 <= maxP1) {
-      p1 += 1; // Make even for equal 2 columns
+      p1 += 1;
     }
     const other = totalQuestions - p1;
     return { p1Capacity: p1, otherCapacity: other, estimatedPages: 2 };
   }
 
-  // For 3+ pages
   const p1 = maxP1;
   const otherPagesRemaining = totalQuestions - p1;
   const perOtherPage = Math.ceil(otherPagesRemaining / numOtherPages);
@@ -1263,9 +1303,9 @@ export function getRecommendedPageCapacities(
 }
 
 /**
- * Smart Question-to-Page Distributor:
- * Calculates discrete A4 pages such that questions fill both columns evenly
- * without leaving large blank spaces at the bottom of pages.
+ * Precision Question-to-Page Layout Engine:
+ * Uses exact pixel height estimation for each question to distribute questions across
+ * discrete A4 pages, filling both columns evenly and eliminating empty space at the bottom.
  */
 export function paginateQuestionsFor2ColPaper(
   questions: Question[],
@@ -1276,64 +1316,163 @@ export function paginateQuestionsFor2ColPaper(
 ): PaperPageLayout[] {
   if (!questions || questions.length === 0) return [];
 
-  let p1Total: number;
-  let otherTotal: number;
+  // Usable vertical height per column in A4 format (at 96 DPI):
+  // Page 1 has top logo, test title, time/marks, and instructions box
+  const p1ColMaxHeight = density === 'ultra-compact' ? 880 : density === 'normal' ? 800 : 840;
+  // Other pages have only a compact header line
+  const otherColMaxHeight = density === 'ultra-compact' ? 1020 : density === 'normal' ? 940 : 980;
 
+  // Compute item heights
+  const itemsWithHeight: PaperPageQuestion[] = questions.map((q, idx) => ({
+    question: q,
+    originalIndex: idx,
+    estimatedHeight: estimateQuestionRenderHeight(q, density)
+  }));
+
+  // If manual numeric question counts are explicitly provided
   if (page1CapOverride && page1CapOverride > 0 && otherCapOverride && otherCapOverride > 0) {
-    p1Total = page1CapOverride;
-    otherTotal = otherCapOverride;
-  } else if (autoBalance) {
-    const rec = getRecommendedPageCapacities(questions.length, density);
-    p1Total = page1CapOverride && page1CapOverride > 0 ? page1CapOverride : rec.p1Capacity;
-    otherTotal = otherCapOverride && otherCapOverride > 0 ? otherCapOverride : rec.otherCapacity;
-  } else {
-    p1Total = density === 'ultra-compact' ? 24 : density === 'normal' ? 16 : 20;
-    otherTotal = density === 'ultra-compact' ? 30 : density === 'normal' ? 20 : 26;
-    if (page1CapOverride && page1CapOverride > 0) p1Total = page1CapOverride;
-    if (otherCapOverride && otherCapOverride > 0) otherTotal = otherCapOverride;
+    const pages: PaperPageLayout[] = [];
+    let currentIndex = 0;
+    let pageNum = 1;
+
+    while (currentIndex < questions.length) {
+      const isFirst = pageNum === 1;
+      const currentTotalCap = isFirst ? page1CapOverride : otherCapOverride;
+      const remaining = questions.length - currentIndex;
+      const countForThisPage = Math.min(currentTotalCap, remaining);
+
+      const col1Count = Math.ceil(countForThisPage / 2);
+      const pageSlice = itemsWithHeight.slice(currentIndex, currentIndex + countForThisPage);
+      const col1 = pageSlice.slice(0, col1Count);
+      const col2 = pageSlice.slice(col1Count);
+
+      pages.push({
+        pageNumber: pageNum,
+        totalPages: 1,
+        isFirstPage: isFirst,
+        col1,
+        col2,
+        col1Height: col1.reduce((sum, item) => sum + item.estimatedHeight, 0),
+        col2Height: col2.reduce((sum, item) => sum + item.estimatedHeight, 0)
+      });
+
+      currentIndex += countForThisPage;
+      pageNum++;
+    }
+
+    const totalPages = Math.max(1, pages.length);
+    pages.forEach(p => { p.totalPages = totalPages; });
+    return pages;
+  }
+
+  // --- HEIGHT-BASED DYNAMIC AUTO-BALANCED PAGINATION ---
+  const totalHeight = itemsWithHeight.reduce((sum, item) => sum + item.estimatedHeight, 0);
+  const p1TotalCapHeight = p1ColMaxHeight * 2;
+  const otherTotalCapHeight = otherColMaxHeight * 2;
+
+  // Calculate minimum total pages needed
+  let numPages = 1;
+  if (totalHeight > p1TotalCapHeight) {
+    numPages = 1 + Math.ceil((totalHeight - p1TotalCapHeight) / otherTotalCapHeight);
+  }
+
+  // If autoBalance is active, adjust target capacity per page proportionally
+  let targetP1ColHeight = p1ColMaxHeight;
+  let targetOtherColHeight = otherColMaxHeight;
+
+  if (autoBalance && numPages > 1) {
+    const totalMaxPossibleHeight = p1TotalCapHeight + (numPages - 1) * otherTotalCapHeight;
+    const fillRatio = Math.min(1.0, Math.max(0.70, totalHeight / totalMaxPossibleHeight));
+    
+    // Scale target column heights smoothly
+    targetP1ColHeight = Math.max(400, Math.round(p1ColMaxHeight * fillRatio));
+    targetOtherColHeight = Math.max(400, Math.round(otherColMaxHeight * fillRatio));
   }
 
   const pages: PaperPageLayout[] = [];
-  let currentIndex = 0;
+  let currentIdx = 0;
   let pageNum = 1;
 
-  while (currentIndex < questions.length) {
+  while (currentIdx < itemsWithHeight.length) {
     const isFirst = pageNum === 1;
-    const currentTotalCap = isFirst ? p1Total : otherTotal;
-    const remaining = questions.length - currentIndex;
-    const countForThisPage = Math.min(currentTotalCap, remaining);
+    const isLastTargetPage = pageNum === numPages;
+    const currentColHeightLimit = isFirst ? targetP1ColHeight : targetOtherColHeight;
+    const absoluteColHeightLimit = isFirst ? p1ColMaxHeight : otherColMaxHeight;
 
-    // Split page questions between Col 1 and Col 2
-    const col1Count = Math.ceil(countForThisPage / 2);
-    const col2Count = countForThisPage - col1Count;
+    const col1: PaperPageQuestion[] = [];
+    const col2: PaperPageQuestion[] = [];
+    let col1Height = 0;
+    let col2Height = 0;
 
-    const pageSlice = questions.slice(currentIndex, currentIndex + countForThisPage);
-    const col1 = pageSlice.slice(0, col1Count).map((q, idx) => ({
-      question: q,
-      originalIndex: currentIndex + idx
-    }));
-    const col2 = pageSlice.slice(col1Count).map((q, idx) => ({
-      question: q,
-      originalIndex: currentIndex + col1Count + idx
-    }));
+    if (isLastTargetPage) {
+      // For the last page, distribute all remaining questions evenly between Col 1 and Col 2
+      const remainingItems = itemsWithHeight.slice(currentIdx);
+      const remainingTotalHeight = remainingItems.reduce((sum, item) => sum + item.estimatedHeight, 0);
+      const targetHalfHeight = remainingTotalHeight / 2;
+
+      let tempCol1Height = 0;
+      let splitIdx = 0;
+      for (let i = 0; i < remainingItems.length; i++) {
+        tempCol1Height += remainingItems[i].estimatedHeight;
+        if (tempCol1Height >= targetHalfHeight || i >= Math.ceil(remainingItems.length / 2)) {
+          splitIdx = i + 1;
+          break;
+        }
+      }
+      if (splitIdx === 0) splitIdx = Math.ceil(remainingItems.length / 2);
+
+      col1.push(...remainingItems.slice(0, splitIdx));
+      col2.push(...remainingItems.slice(splitIdx));
+      col1Height = col1.reduce((sum, item) => sum + item.estimatedHeight, 0);
+      col2Height = col2.reduce((sum, item) => sum + item.estimatedHeight, 0);
+      currentIdx = itemsWithHeight.length;
+    } else {
+      // 1. Fill Left Column
+      while (currentIdx < itemsWithHeight.length) {
+        const item = itemsWithHeight[currentIdx];
+        if (col1.length > 0 && (col1Height + item.estimatedHeight > currentColHeightLimit || col1Height + item.estimatedHeight > absoluteColHeightLimit)) {
+          break;
+        }
+        col1.push(item);
+        col1Height += item.estimatedHeight;
+        currentIdx++;
+      }
+
+      // 2. Fill Right Column
+      while (currentIdx < itemsWithHeight.length) {
+        const item = itemsWithHeight[currentIdx];
+        if (col2.length > 0 && (col2Height + item.estimatedHeight > currentColHeightLimit || col2Height + item.estimatedHeight > absoluteColHeightLimit)) {
+          break;
+        }
+        col2.push(item);
+        col2Height += item.estimatedHeight;
+        currentIdx++;
+      }
+    }
+
+    // Safety fallback: Ensure page has at least 1 question
+    if (col1.length === 0 && col2.length === 0 && currentIdx < itemsWithHeight.length) {
+      const item = itemsWithHeight[currentIdx];
+      col1.push(item);
+      col1Height += item.estimatedHeight;
+      currentIdx++;
+    }
 
     pages.push({
       pageNumber: pageNum,
-      totalPages: 1, // updated below
+      totalPages: 1,
       isFirstPage: isFirst,
       col1,
-      col2
+      col2,
+      col1Height,
+      col2Height
     });
 
-    currentIndex += countForThisPage;
     pageNum++;
   }
 
-  const totalPages = Math.max(1, pages.length);
-  pages.forEach(p => {
-    p.totalPages = totalPages;
-  });
-
+  const finalTotalPages = Math.max(1, pages.length);
+  pages.forEach(p => { p.totalPages = finalTotalPages; });
   return pages;
 }
 
@@ -2022,7 +2161,7 @@ export function printNativeCompact2ColPaper(
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
       return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.3;">
+        <div class="question-item" style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; page-break-inside: avoid; break-inside: avoid;">
           <div style="font-weight: bold; color: #000; margin-bottom: 2px;">
             <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
           </div>
@@ -2063,10 +2202,10 @@ export function printNativeCompact2ColPaper(
     let header = '';
     if (page.isFirstPage) {
       header = `
-        <div style="text-align:center; margin-bottom:8px;">
+        <div style="text-align:center; margin-bottom:6px;">
           ${logoHtml}
-          <h1 style="margin:0; font-size:16pt; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(testTitle)}</h1>
-          <div style="font-size:9pt; font-weight:bold; margin-top:4px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:center; gap:16px;">
+          <h1 style="margin:0; font-size:15pt; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">${escapeHtml(testTitle)}</h1>
+          <div style="font-size:8.5pt; font-weight:bold; margin-top:4px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:center; gap:16px;">
             <span>Time Allowed: ${duration} Mins</span>
             <span>|</span>
             <span>Max Marks: ${marks}</span>
@@ -2074,7 +2213,7 @@ export function printNativeCompact2ColPaper(
           </div>
         </div>
         ${defaultInst ? `
-          <div style="border:1px solid #64748b; padding:4px 8px; margin-bottom:8px; font-size:8pt; line-height:1.3; background:#fff;">
+          <div style="border:1px solid #64748b; padding:4px 8px; margin-bottom:6px; font-size:7.5pt; line-height:1.3; background:#fff;">
             <strong>General Instructions:</strong><br/>
             ${escapeHtml(defaultInst).replace(/\n/g, '<br/>')}
           </div>
@@ -2082,9 +2221,9 @@ export function printNativeCompact2ColPaper(
       `;
     } else {
       header = `
-        <div style="margin-bottom:6px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:space-between; align-items:center; font-size:9pt; font-weight:bold;">
+        <div style="margin-bottom:6px; padding-bottom:4px; border-bottom:1.5px solid #000; display:flex; justify-content:space-between; align-items:center; font-size:8.5pt; font-weight:bold;">
           <span>${escapeHtml(testTitle)}</span>
-          <span style="font-size:8.5pt; background:#000; color:#fff; padding:1px 6px; border-radius:2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
+          <span style="font-size:8pt; background:#000; color:#fff; padding:1px 6px; border-radius:2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
         </div>
       `;
     }
@@ -2123,7 +2262,7 @@ export function printNativeCompact2ColPaper(
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap');
         @page {
           size: A4 portrait;
-          margin: 8mm 8mm 8mm 8mm;
+          margin: 6mm 8mm 6mm 8mm;
         }
         * {
           box-sizing: border-box;
@@ -2153,16 +2292,20 @@ export function printNativeCompact2ColPaper(
         .print-page {
           background: #ffffff;
           width: 210mm;
-          min-height: 280mm;
+          min-height: 278mm;
+          max-height: 278mm;
           margin: 15px auto;
-          padding: 18mm 14mm 14mm 14mm;
+          padding: 12mm 12mm 10mm 12mm;
           position: relative;
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           page-break-after: always;
           break-after: page;
+          page-break-inside: avoid;
+          break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
+          overflow: hidden;
         }
         .page-inner {
           position: relative;
@@ -2209,13 +2352,14 @@ export function printNativeCompact2ColPaper(
           .print-page {
             box-shadow: none;
             margin: 0;
-            padding: 4mm 6mm 4mm 6mm;
+            padding: 4mm 4mm 2mm 4mm;
             width: 100%;
-            height: 100vh;
-            min-height: 275mm;
-            max-height: 278mm;
+            height: 100%;
+            max-height: 277mm;
             page-break-after: always;
             break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
           .print-page:last-child {
             page-break-after: avoid;
