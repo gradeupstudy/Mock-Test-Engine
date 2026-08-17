@@ -13,7 +13,8 @@ import {
   paginateQuestionsFor2ColPaper,
   getRecommendedPageCapacities,
   PaperPageLayout,
-  PaperPageQuestion
+  PaperPageQuestion,
+  estimateQuestionRenderHeight
 } from '../lib/exportUtils';
 import { optimizePrintLayoutWithAi, AiLayoutOptimizationResult } from '../lib/aiClient';
 import { PRESET_LOGOS } from '../lib/paperLogos';
@@ -58,7 +59,10 @@ import {
   RotateCcw,
   Keyboard,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Split,
+  GitFork,
+  Minimize2
 } from 'lucide-react';
 
 interface PrintPaperViewProps {
@@ -522,6 +526,170 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
         setTimeout(() => setShiftWarningToast(null), 5000);
       }
     }
+
+    setCustomPages(cleaned);
+  };
+
+  // Split Question & Options into separate items (Question remains, Options move to next column or page)
+  const handleSplitQuestionAndOptions = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    const sourceCol = colIdx === 1 ? current[pageIdx].col1 : current[pageIdx].col2;
+    if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
+
+    const originalItem = sourceCol[itemIdxInCol];
+    // Mark current item as question_only
+    const qPart: PaperPageQuestion = {
+      ...originalItem,
+      splitType: 'question_only',
+      estimatedHeight: estimateQuestionRenderHeight(originalItem.question, density, 'question_only')
+    };
+    sourceCol[itemIdxInCol] = qPart;
+
+    // Create options_only item
+    const optPart: PaperPageQuestion = {
+      ...originalItem,
+      splitType: 'options_only',
+      estimatedHeight: estimateQuestionRenderHeight(originalItem.question, density, 'options_only')
+    };
+
+    // Insert optPart into the next slot (col 2 of same page, or next page)
+    if (colIdx === 1) {
+      current[pageIdx].col2.unshift(optPart);
+    } else {
+      if (pageIdx < current.length - 1) {
+        current[pageIdx + 1].col1.unshift(optPart);
+      } else {
+        current.push({
+          pageNumber: current.length + 1,
+          totalPages: current.length + 1,
+          isFirstPage: false,
+          col1: [optPart],
+          col2: [],
+          col1Height: optPart.estimatedHeight,
+          col2Height: 0
+        });
+      }
+    }
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  // Split Options A,B and C,D
+  const handleSplitOptionsAB_CD = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    const sourceCol = colIdx === 1 ? current[pageIdx].col1 : current[pageIdx].col2;
+    if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
+
+    const originalItem = sourceCol[itemIdxInCol];
+    const abPart: PaperPageQuestion = {
+      ...originalItem,
+      splitType: 'options_ab',
+      estimatedHeight: estimateQuestionRenderHeight(originalItem.question, density, 'options_ab')
+    };
+    sourceCol[itemIdxInCol] = abPart;
+
+    const cdPart: PaperPageQuestion = {
+      ...originalItem,
+      splitType: 'options_cd',
+      estimatedHeight: estimateQuestionRenderHeight(originalItem.question, density, 'options_cd')
+    };
+
+    if (colIdx === 1) {
+      current[pageIdx].col2.unshift(cdPart);
+    } else {
+      if (pageIdx < current.length - 1) {
+        current[pageIdx + 1].col1.unshift(cdPart);
+      } else {
+        current.push({
+          pageNumber: current.length + 1,
+          totalPages: current.length + 1,
+          isFirstPage: false,
+          col1: [cdPart],
+          col2: [],
+          col1Height: cdPart.estimatedHeight,
+          col2Height: 0
+        });
+      }
+    }
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
+
+    setCustomPages(cleaned);
+  };
+
+  // Merge split question and options back into a single full question
+  const handleMergeSplitItem = (pageIdx: number, colIdx: 1 | 2, itemIdxInCol: number) => {
+    const current: PaperPageLayout[] = (customPages || autoPaperPages).map(p => ({
+      ...p,
+      col1: [...p.col1],
+      col2: [...p.col2]
+    }));
+
+    const sourceCol = colIdx === 1 ? current[pageIdx].col1 : current[pageIdx].col2;
+    if (itemIdxInCol < 0 || itemIdxInCol >= sourceCol.length) return;
+
+    const targetItem = sourceCol[itemIdxInCol];
+    const origIdx = targetItem.originalIndex;
+
+    let firstFound = false;
+    for (const p of current) {
+      p.col1 = p.col1.filter(item => {
+        if (item.originalIndex === origIdx) {
+          if (!firstFound) {
+            item.splitType = 'full';
+            item.estimatedHeight = estimateQuestionRenderHeight(item.question, density, 'full');
+            firstFound = true;
+            return true;
+          }
+          return false;
+        }
+        return true;
+      });
+      p.col2 = p.col2.filter(item => {
+        if (item.originalIndex === origIdx) {
+          if (!firstFound) {
+            item.splitType = 'full';
+            item.estimatedHeight = estimateQuestionRenderHeight(item.question, density, 'full');
+            firstFound = true;
+            return true;
+          }
+          return false;
+        }
+        return true;
+      });
+    }
+
+    const cleaned = current.filter(p => p.col1.length > 0 || p.col2.length > 0);
+    const total = Math.max(1, cleaned.length);
+    cleaned.forEach((p, idx) => {
+      p.pageNumber = idx + 1;
+      p.totalPages = total;
+      p.isFirstPage = idx === 0;
+    });
 
     setCustomPages(cleaned);
   };
@@ -1648,15 +1816,20 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                           {page.col1.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
+                            const splitType = item.splitType || 'full';
                             const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
                             const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
                             const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
+                            const showQuestionText = splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab';
+                            const showOptAB = splitType === 'full' || splitType === 'options_only' || splitType === 'options_ab';
+                            const showOptCD = splitType === 'full' || splitType === 'options_only' || splitType === 'options_cd';
+
                             return (
                               <div
-                                key={q.id || item.originalIndex}
+                                key={`${q.id || item.originalIndex}-${splitType}-${itemIdx}`}
                                 tabIndex={0}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Backspace' && (e.altKey || e.ctrlKey || e.metaKey)) {
@@ -1671,15 +1844,15 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                   density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
                                 }`}
                               >
-                                {/* Manual Shift Actions (Backspace & Enter) Hover Toolbar */}
-                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity">
+                                {/* Manual Shift Actions (Backspace & Enter & Option Split) Hover Toolbar */}
+                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleShiftQuestionBack(pageIdx, 1, itemIdx);
                                     }}
                                     disabled={pageIdx === 0 && itemIdx === 0}
-                                    title={pageIdx > 0 ? "Pull back to previous page" : "Already at beginning"}
+                                    title={pageIdx > 0 ? "Pull back to previous page (Backspace)" : "Already at beginning"}
                                     className="hover:text-amber-300 disabled:opacity-30 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
                                   >
                                     <CornerDownLeft className="w-2.5 h-2.5" />
@@ -1698,17 +1871,45 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     <CornerDownRight className="w-2.5 h-2.5" />
                                   </button>
                                   <span className="text-slate-600">|</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handlePushBreakToNextPage(pageIdx, 1, itemIdx);
-                                    }}
-                                    title="Split Page from here"
-                                    className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
-                                  >
-                                    <Scissors className="w-2.5 h-2.5" />
-                                    <span>Break</span>
-                                  </button>
+                                  {splitType !== 'full' ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMergeSplitItem(pageIdx, 1, itemIdx);
+                                      }}
+                                      title="Recombine question and options together"
+                                      className="hover:text-amber-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800 text-amber-400 font-bold"
+                                    >
+                                      <Minimize2 className="w-2.5 h-2.5" />
+                                      <span>Recombine</span>
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSplitQuestionAndOptions(pageIdx, 1, itemIdx);
+                                        }}
+                                        title="Keep question here, push all options to next column/page"
+                                        className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                      >
+                                        <Split className="w-2.5 h-2.5" />
+                                        <span>Split Options</span>
+                                      </button>
+                                      <span className="text-slate-600">|</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePushBreakToNextPage(pageIdx, 1, itemIdx);
+                                        }}
+                                        title="Split Page from here"
+                                        className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                      >
+                                        <Scissors className="w-2.5 h-2.5" />
+                                        <span>Break</span>
+                                      </button>
+                                    </>
+                                  )}
                                   {isLiveEditMode && (
                                     <>
                                       <span className="text-slate-600">|</span>
@@ -1727,61 +1928,170 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                   )}
                                 </div>
 
-                                <div className="font-bold text-black">
-                                  <span>Q{qNum}. </span>
-                                  {isLiveEditMode ? (
-                                    <span
-                                      contentEditable
-                                      suppressContentEditableWarning
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
-                                          e.preventDefault();
-                                          handleShiftQuestionBack(pageIdx, 1, itemIdx);
-                                        } else if (e.key === 'Enter' && e.altKey) {
-                                          e.preventDefault();
-                                          handleShiftQuestionForward(pageIdx, 1, itemIdx);
-                                        }
-                                      }}
-                                      onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
-                                      className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
-                                    >
-                                      {formatMathSymbols(q.question)}
-                                    </span>
-                                  ) : (
-                                    <span>{formatMathSymbols(q.question)}</span>
-                                  )}
-                                </div>
+                                {/* Question Statement Section */}
+                                {showQuestionText && (
+                                  <>
+                                    <div className="font-bold text-black flex items-baseline justify-between gap-1">
+                                      <div>
+                                        <span>Q{qNum}. </span>
+                                        {isLiveEditMode ? (
+                                          <span
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                                e.preventDefault();
+                                                handleShiftQuestionBack(pageIdx, 1, itemIdx);
+                                              } else if (e.key === 'Enter' && e.altKey) {
+                                                e.preventDefault();
+                                                handleShiftQuestionForward(pageIdx, 1, itemIdx);
+                                              }
+                                            }}
+                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                          >
+                                            {formatMathSymbols(q.question)}
+                                          </span>
+                                        ) : (
+                                          <span>{formatMathSymbols(q.question)}</span>
+                                        )}
+                                      </div>
+                                      {splitType === 'question_only' && (
+                                        <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
+                                          Q ONLY
+                                        </span>
+                                      )}
+                                      {splitType === 'options_ab' && (
+                                        <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
+                                          A & B
+                                        </span>
+                                      )}
+                                    </div>
 
-                                {shouldDisplayTranslation(q.question, q.translation) && (
-                                  <div className="text-slate-800 text-[10px]">
-                                    {isLiveEditMode ? (
-                                      <span
-                                        contentEditable
-                                        suppressContentEditableWarning
-                                        onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
-                                        className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
-                                      >
-                                        {formatMathSymbols(q.translation!)}
-                                      </span>
-                                    ) : (
-                                      formatMathSymbols(q.translation!)
+                                    {shouldDisplayTranslation(q.question, q.translation) && (
+                                      <div className="text-slate-800 text-[10px]">
+                                        {isLiveEditMode ? (
+                                          <span
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
+                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
+                                          >
+                                            {formatMathSymbols(q.translation!)}
+                                          </span>
+                                        ) : (
+                                          formatMathSymbols(q.translation!)
+                                        )}
+                                      </div>
                                     )}
+                                  </>
+                                )}
+
+                                {/* Continuation Header for Split Options */}
+                                {(splitType === 'options_only' || splitType === 'options_cd') && (
+                                  <div className="flex items-center justify-between font-bold text-black border-b border-slate-200 pb-0.5 mb-0.5">
+                                    <span className="text-[10.5px]">
+                                      Q{qNum}. {splitType === 'options_only' ? '(Options)' : '(Options Continued)'}:
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-mono font-bold">
+                                        {splitType === 'options_only' ? 'OPTIONS ONLY' : 'C & D ONLY'}
+                                      </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleMergeSplitItem(pageIdx, 1, itemIdx);
+                                        }}
+                                        title="Merge back with question"
+                                        className="text-[9px] text-blue-600 hover:text-blue-800 underline font-normal"
+                                      >
+                                        Recombine
+                                      </button>
+                                    </div>
                                   </div>
                                 )}
 
-                                {isShort ? (
-                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black pt-0.5">
-                                    <div>{optA}</div>
-                                    <div>{optB}</div>
-                                    <div>{optC}</div>
-                                    <div>{optD}</div>
+                                {/* Options Rendering */}
+                                {splitType === 'question_only' ? (
+                                  <div className="flex items-center justify-between text-[9px] text-slate-500 italic bg-slate-50 px-1.5 py-0.5 rounded border border-dashed border-slate-300">
+                                    <span>Options shifted to next column/page ⮞</span>
+                                    <button
+                                      onClick={() => handleMergeSplitItem(pageIdx, 1, itemIdx)}
+                                      className="text-[9px] text-blue-600 hover:text-blue-800 font-bold not-italic underline"
+                                    >
+                                      Recombine
+                                    </button>
                                   </div>
                                 ) : (
-                                  <div className="flex flex-col gap-0.5 text-[10px] text-black pt-0.5">
-                                    <div>{optA}</div>
-                                    <div>{optB}</div>
-                                    <div>{optC}</div>
-                                    <div>{optD}</div>
+                                  <div className="pt-0.5">
+                                    {showOptAB && showOptCD ? (
+                                      isShort ? (
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col gap-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      )
+                                    ) : showOptAB && !showOptCD ? (
+                                      <div className="space-y-0.5">
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                        </div>
+                                        <div className="flex items-center justify-between text-[8.5px] text-purple-600 italic bg-purple-50 px-1 py-0.2 rounded border border-dashed border-purple-200">
+                                          <span>(C) & (D) on next col/page ⮞</span>
+                                          <button
+                                            onClick={() => handleMergeSplitItem(pageIdx, 1, itemIdx)}
+                                            className="text-blue-600 hover:text-blue-800 underline not-italic"
+                                          >
+                                            Recombine
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-0.5">
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Quick Option-level Split Action Bar (Visible on full questions) */}
+                                    {splitType === 'full' && (
+                                      <div className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSplitQuestionAndOptions(pageIdx, 1, itemIdx);
+                                          }}
+                                          className="text-[8.5px] text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-1.5 py-0.2 rounded flex items-center gap-0.5"
+                                          title="Keep question here, move all options (A-D) to next column/page"
+                                        >
+                                          <Split className="w-2.5 h-2.5" />
+                                          <span>Move Options ⮞</span>
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSplitOptionsAB_CD(pageIdx, 1, itemIdx);
+                                          }}
+                                          className="text-[8.5px] text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-1.5 py-0.2 rounded flex items-center gap-0.5"
+                                          title="Keep Question + Options (A, B) here, move Options (C, D) to next column/page"
+                                        >
+                                          <GitFork className="w-2.5 h-2.5" />
+                                          <span>Split C-D ⮞</span>
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1794,15 +2104,20 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                           {page.col2.map((item, itemIdx) => {
                             const qNum = item.originalIndex + 1;
                             const q = item.question;
+                            const splitType = item.splitType || 'full';
                             const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
                             const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
                             const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
+                            const showQuestionText = splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab';
+                            const showOptAB = splitType === 'full' || splitType === 'options_only' || splitType === 'options_ab';
+                            const showOptCD = splitType === 'full' || splitType === 'options_only' || splitType === 'options_cd';
+
                             return (
                               <div
-                                key={q.id || item.originalIndex}
+                                key={`${q.id || item.originalIndex}-${splitType}-${itemIdx}`}
                                 tabIndex={0}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Backspace' && (e.altKey || e.ctrlKey || e.metaKey)) {
@@ -1817,8 +2132,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                   density === 'ultra-compact' ? 'text-[10px] space-y-0.5' : density === 'normal' ? 'text-[12px] space-y-1' : 'space-y-0.5'
                                 }`}
                               >
-                                {/* Manual Shift Actions (Backspace & Enter) Hover Toolbar */}
-                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity">
+                                {/* Manual Shift Actions (Backspace & Enter & Option Split) Hover Toolbar */}
+                                <div className="absolute -top-3.5 right-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg z-30 transition-opacity whitespace-nowrap">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1843,17 +2158,45 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     <CornerDownRight className="w-2.5 h-2.5" />
                                   </button>
                                   <span className="text-slate-600">|</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handlePushBreakToNextPage(pageIdx, 2, itemIdx);
-                                    }}
-                                    title="Split Page from here"
-                                    className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
-                                  >
-                                    <Scissors className="w-2.5 h-2.5" />
-                                    <span>Break</span>
-                                  </button>
+                                  {splitType !== 'full' ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMergeSplitItem(pageIdx, 2, itemIdx);
+                                      }}
+                                      title="Recombine question and options together"
+                                      className="hover:text-amber-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800 text-amber-400 font-bold"
+                                    >
+                                      <Minimize2 className="w-2.5 h-2.5" />
+                                      <span>Recombine</span>
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSplitQuestionAndOptions(pageIdx, 2, itemIdx);
+                                        }}
+                                        title="Keep question here, push all options to next column/page"
+                                        className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                      >
+                                        <Split className="w-2.5 h-2.5" />
+                                        <span>Split Options</span>
+                                      </button>
+                                      <span className="text-slate-600">|</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePushBreakToNextPage(pageIdx, 2, itemIdx);
+                                        }}
+                                        title="Split Page from here"
+                                        className="hover:text-sky-300 flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-slate-800"
+                                      >
+                                        <Scissors className="w-2.5 h-2.5" />
+                                        <span>Break</span>
+                                      </button>
+                                    </>
+                                  )}
                                   {isLiveEditMode && (
                                     <>
                                       <span className="text-slate-600">|</span>
@@ -1872,61 +2215,170 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                   )}
                                 </div>
 
-                                <div className="font-bold text-black">
-                                  <span>Q{qNum}. </span>
-                                  {isLiveEditMode ? (
-                                    <span
-                                      contentEditable
-                                      suppressContentEditableWarning
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
-                                          e.preventDefault();
-                                          handleShiftQuestionBack(pageIdx, 2, itemIdx);
-                                        } else if (e.key === 'Enter' && e.altKey) {
-                                          e.preventDefault();
-                                          handleShiftQuestionForward(pageIdx, 2, itemIdx);
-                                        }
-                                      }}
-                                      onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
-                                      className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
-                                    >
-                                      {formatMathSymbols(q.question)}
-                                    </span>
-                                  ) : (
-                                    <span>{formatMathSymbols(q.question)}</span>
-                                  )}
-                                </div>
+                                {/* Question Statement Section */}
+                                {showQuestionText && (
+                                  <>
+                                    <div className="font-bold text-black flex items-baseline justify-between gap-1">
+                                      <div>
+                                        <span>Q{qNum}. </span>
+                                        {isLiveEditMode ? (
+                                          <span
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                                e.preventDefault();
+                                                handleShiftQuestionBack(pageIdx, 2, itemIdx);
+                                              } else if (e.key === 'Enter' && e.altKey) {
+                                                e.preventDefault();
+                                                handleShiftQuestionForward(pageIdx, 2, itemIdx);
+                                              }
+                                            }}
+                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                          >
+                                            {formatMathSymbols(q.question)}
+                                          </span>
+                                        ) : (
+                                          <span>{formatMathSymbols(q.question)}</span>
+                                        )}
+                                      </div>
+                                      {splitType === 'question_only' && (
+                                        <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
+                                          Q ONLY
+                                        </span>
+                                      )}
+                                      {splitType === 'options_ab' && (
+                                        <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
+                                          A & B
+                                        </span>
+                                      )}
+                                    </div>
 
-                                {shouldDisplayTranslation(q.question, q.translation) && (
-                                  <div className="text-slate-800 text-[10px]">
-                                    {isLiveEditMode ? (
-                                      <span
-                                        contentEditable
-                                        suppressContentEditableWarning
-                                        onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
-                                        className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
-                                      >
-                                        {formatMathSymbols(q.translation!)}
-                                      </span>
-                                    ) : (
-                                      formatMathSymbols(q.translation!)
+                                    {shouldDisplayTranslation(q.question, q.translation) && (
+                                      <div className="text-slate-800 text-[10px]">
+                                        {isLiveEditMode ? (
+                                          <span
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'translation', e.currentTarget.textContent || '')}
+                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded block"
+                                          >
+                                            {formatMathSymbols(q.translation!)}
+                                          </span>
+                                        ) : (
+                                          formatMathSymbols(q.translation!)
+                                        )}
+                                      </div>
                                     )}
+                                  </>
+                                )}
+
+                                {/* Continuation Header for Split Options */}
+                                {(splitType === 'options_only' || splitType === 'options_cd') && (
+                                  <div className="flex items-center justify-between font-bold text-black border-b border-slate-200 pb-0.5 mb-0.5">
+                                    <span className="text-[10.5px]">
+                                      Q{qNum}. {splitType === 'options_only' ? '(Options)' : '(Options Continued)'}:
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-mono font-bold">
+                                        {splitType === 'options_only' ? 'OPTIONS ONLY' : 'C & D ONLY'}
+                                      </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleMergeSplitItem(pageIdx, 2, itemIdx);
+                                        }}
+                                        title="Merge back with question"
+                                        className="text-[9px] text-blue-600 hover:text-blue-800 underline font-normal"
+                                      >
+                                        Recombine
+                                      </button>
+                                    </div>
                                   </div>
                                 )}
 
-                                {isShort ? (
-                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black pt-0.5">
-                                    <div>{optA}</div>
-                                    <div>{optB}</div>
-                                    <div>{optC}</div>
-                                    <div>{optD}</div>
+                                {/* Options Rendering */}
+                                {splitType === 'question_only' ? (
+                                  <div className="flex items-center justify-between text-[9px] text-slate-500 italic bg-slate-50 px-1.5 py-0.5 rounded border border-dashed border-slate-300">
+                                    <span>Options shifted to next column/page ⮞</span>
+                                    <button
+                                      onClick={() => handleMergeSplitItem(pageIdx, 2, itemIdx)}
+                                      className="text-[9px] text-blue-600 hover:text-blue-800 font-bold not-italic underline"
+                                    >
+                                      Recombine
+                                    </button>
                                   </div>
                                 ) : (
-                                  <div className="flex flex-col gap-0.5 text-[10px] text-black pt-0.5">
-                                    <div>{optA}</div>
-                                    <div>{optB}</div>
-                                    <div>{optC}</div>
-                                    <div>{optD}</div>
+                                  <div className="pt-0.5">
+                                    {showOptAB && showOptCD ? (
+                                      isShort ? (
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col gap-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      )
+                                    ) : showOptAB && !showOptCD ? (
+                                      <div className="space-y-0.5">
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optA}</div>
+                                          <div>{optB}</div>
+                                        </div>
+                                        <div className="flex items-center justify-between text-[8.5px] text-purple-600 italic bg-purple-50 px-1 py-0.2 rounded border border-dashed border-purple-200">
+                                          <span>(C) & (D) on next col/page ⮞</span>
+                                          <button
+                                            onClick={() => handleMergeSplitItem(pageIdx, 2, itemIdx)}
+                                            className="text-blue-600 hover:text-blue-800 underline not-italic"
+                                          >
+                                            Recombine
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-0.5">
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
+                                          <div>{optC}</div>
+                                          <div>{optD}</div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Quick Option-level Split Action Bar (Visible on full questions) */}
+                                    {splitType === 'full' && (
+                                      <div className="opacity-0 group-hover:opacity-100 flex items-center justify-end gap-1.5 pt-0.5 mt-0.5 border-t border-slate-100 transition-opacity">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSplitQuestionAndOptions(pageIdx, 2, itemIdx);
+                                          }}
+                                          className="text-[8.5px] text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-1.5 py-0.2 rounded flex items-center gap-0.5"
+                                          title="Keep question here, move all options (A-D) to next column/page"
+                                        >
+                                          <Split className="w-2.5 h-2.5" />
+                                          <span>Move Options ⮞</span>
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSplitOptionsAB_CD(pageIdx, 2, itemIdx);
+                                          }}
+                                          className="text-[8.5px] text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-1.5 py-0.2 rounded flex items-center gap-0.5"
+                                          title="Keep Question + Options (A, B) here, move Options (C, D) to next column/page"
+                                        >
+                                          <GitFork className="w-2.5 h-2.5" />
+                                          <span>Split C-D ⮞</span>
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>

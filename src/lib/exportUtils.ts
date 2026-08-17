@@ -1212,6 +1212,7 @@ export interface PaperPageQuestion {
   question: Question;
   originalIndex: number;
   estimatedHeight: number;
+  splitType?: 'full' | 'question_only' | 'options_only' | 'options_ab' | 'options_cd';
 }
 
 export interface PaperPageLayout {
@@ -1226,11 +1227,12 @@ export interface PaperPageLayout {
 
 /**
  * Accurately estimates rendered height (in pixels) for a question in 2-column A4 format.
- * Accounts for question text length, translation presence, option lengths (2x2 vs 4 stacked), and density.
+ * Accounts for question text length, translation presence, option lengths (2x2 vs 4 stacked), density, and split type.
  */
 export function estimateQuestionRenderHeight(
   q: Question,
-  density: 'compact' | 'ultra-compact' | 'normal' = 'compact'
+  density: 'compact' | 'ultra-compact' | 'normal' = 'compact',
+  splitType?: 'full' | 'question_only' | 'options_only' | 'options_ab' | 'options_cd'
 ): number {
   const isUltra = density === 'ultra-compact';
   const isNormal = density === 'normal';
@@ -1243,13 +1245,13 @@ export function estimateQuestionRenderHeight(
   // English text fits ~42-46 chars per line, Hindi fits ~36-40 chars per line
   const qText = q.question || '';
   const qLines = Math.max(1, Math.ceil(qText.length / 44));
-  let height = qLines * fontLineHeight + 2;
+  let qH = qLines * fontLineHeight + 2;
 
   // Hindi Translation
   if (shouldDisplayTranslation(qText, q.translation)) {
     const tText = q.translation || '';
     const tLines = Math.max(1, Math.ceil(tText.length / 38));
-    height += tLines * (fontLineHeight * 0.95) + 3;
+    qH += tLines * (fontLineHeight * 0.95) + 3;
   }
 
   // Options layout (2x2 grid vs 4 stacked lines)
@@ -1259,20 +1261,33 @@ export function estimateQuestionRenderHeight(
   const optD = (q.optionD || '');
   const isShort = optA.length < 22 && optB.length < 22 && optC.length < 22 && optD.length < 22;
 
+  let optH = 0;
   if (isShort) {
     // 2 rows of options
-    height += 2 * optLineHeight + 4;
+    optH = 2 * optLineHeight + 4;
   } else {
     // 4 rows of options
     const optALines = Math.max(1, Math.ceil(optA.length / 42));
     const optBLines = Math.max(1, Math.ceil(optB.length / 42));
     const optCLines = Math.max(1, Math.ceil(optC.length / 42));
     const optDLines = Math.max(1, Math.ceil(optD.length / 42));
-    height += (optALines + optBLines + optCLines + optDLines) * optLineHeight + 4;
+    optH = (optALines + optBLines + optCLines + optDLines) * optLineHeight + 4;
   }
 
-  height += qMargin;
-  return Math.ceil(height);
+  if (splitType === 'question_only') {
+    return Math.ceil(qH + qMargin / 2);
+  }
+  if (splitType === 'options_only') {
+    return Math.ceil(optH + 16 + qMargin / 2);
+  }
+  if (splitType === 'options_ab') {
+    return Math.ceil(qH + optH / 2 + qMargin / 2);
+  }
+  if (splitType === 'options_cd') {
+    return Math.ceil(optH / 2 + 16 + qMargin / 2);
+  }
+
+  return Math.ceil(qH + optH + qMargin);
 }
 
 // -------------------------------------------------------------
@@ -1321,22 +1336,32 @@ export function exportWordBookletPaper(
     return items.map(item => {
       const qNum = item.originalIndex + 1;
       const q = item.question;
+      const splitType = item.splitType || 'full';
       const optA = `(A) ${formatMathSymbols(q.optionA || '')}`;
       const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
       const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
       const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
-      return `
-        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; mso-line-height-rule: exactly; page-break-inside: avoid;">
-          <div style="font-weight: bold; color: #000000; margin-bottom: 1pt;">
-            <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+      const qHeaderHtml = `
+        <div style="font-weight: bold; color: #000000; margin-bottom: 1pt;">
+          <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+        </div>
+        ${shouldDisplayTranslation(q.question, q.translation) ? `
+          <div style="color: #1e293b; font-size: ${fontPt}; margin-bottom: 2pt;">
+            ${escapeHtml(formatMathSymbols(q.translation!))}
           </div>
-          ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-size: ${fontPt}; margin-bottom: 2pt;">
-              ${escapeHtml(formatMathSymbols(q.translation!))}
-            </div>
-          ` : ''}
+        ` : ''}
+      `;
+
+      let optContent = '';
+      if (splitType === 'question_only') {
+        optContent = '';
+      } else if (splitType === 'options_only') {
+        optContent = `
+          <div style="font-weight: bold; font-size: ${optFontPt}; margin-bottom: 1pt;">
+            <span>Q${qNum}. (Options):</span>
+          </div>
           ${isShort ? `
             <table style="width: 100%; border-collapse: collapse; font-size: ${optFontPt}; margin-top: 1pt; border: none;">
               <tr>
@@ -1356,6 +1381,50 @@ export function exportWordBookletPaper(
               <div style="padding: 1pt 0;">${escapeHtml(optD)}</div>
             </div>
           `}
+        `;
+      } else if (splitType === 'options_ab') {
+        optContent = `
+          <div style="font-size: ${optFontPt}; margin-top: 1pt;">
+            <div style="padding: 1pt 0;">${escapeHtml(optA)}</div>
+            <div style="padding: 1pt 0;">${escapeHtml(optB)}</div>
+          </div>
+        `;
+      } else if (splitType === 'options_cd') {
+        optContent = `
+          <div style="font-weight: bold; font-size: ${optFontPt}; margin-bottom: 1pt;">
+            <span>Q${qNum}. (Contd):</span>
+          </div>
+          <div style="font-size: ${optFontPt}; margin-top: 1pt;">
+            <div style="padding: 1pt 0;">${escapeHtml(optC)}</div>
+            <div style="padding: 1pt 0;">${escapeHtml(optD)}</div>
+          </div>
+        `;
+      } else {
+        optContent = isShort ? `
+          <table style="width: 100%; border-collapse: collapse; font-size: ${optFontPt}; margin-top: 1pt; border: none;">
+            <tr>
+              <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top; border: none;">${escapeHtml(optA)}</td>
+              <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top; border: none;">${escapeHtml(optB)}</td>
+            </tr>
+            <tr>
+              <td style="width: 50%; padding: 1pt 4pt 1pt 0; vertical-align: top; border: none;">${escapeHtml(optC)}</td>
+              <td style="width: 50%; padding: 1pt 0 1pt 4pt; vertical-align: top; border: none;">${escapeHtml(optD)}</td>
+            </tr>
+          </table>
+        ` : `
+          <div style="font-size: ${optFontPt}; margin-top: 1pt;">
+            <div style="padding: 1pt 0;">${escapeHtml(optA)}</div>
+            <div style="padding: 1pt 0;">${escapeHtml(optB)}</div>
+            <div style="padding: 1pt 0;">${escapeHtml(optC)}</div>
+            <div style="padding: 1pt 0;">${escapeHtml(optD)}</div>
+          </div>
+        `;
+      }
+
+      return `
+        <div style="margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.32; mso-line-height-rule: exactly; page-break-inside: avoid;">
+          ${(splitType !== 'options_only' && splitType !== 'options_cd') ? qHeaderHtml : ''}
+          ${optContent}
         </div>
       `;
     }).join('');
@@ -1718,6 +1787,7 @@ export async function exportCompact2ColPdfTestPaper(
     return items.map(item => {
       const qNum = item.originalIndex + 1;
       const q = item.question;
+      const splitType = item.splitType || 'full';
       const optA = `(A) ${escapeHtml(formatMathSymbols(q.optionA || ''))}`;
       const optB = `(B) ${escapeHtml(formatMathSymbols(q.optionB || ''))}`;
       const optC = `(C) ${escapeHtml(formatMathSymbols(q.optionC || ''))}`;
@@ -1725,16 +1795,25 @@ export async function exportCompact2ColPdfTestPaper(
 
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
-      return `
-        <div style="padding: 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
-          <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
-            <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+      const qHeaderHtml = `
+        <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
+          <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+        </div>
+        ${shouldDisplayTranslation(q.question, q.translation) ? `
+          <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
+            ${escapeHtml(formatMathSymbols(q.translation!))}
           </div>
-          ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
-              ${escapeHtml(formatMathSymbols(q.translation!))}
-            </div>
-          ` : ''}
+        ` : ''}
+      `;
+
+      let optContent = '';
+      if (splitType === 'question_only') {
+        optContent = '';
+      } else if (splitType === 'options_only') {
+        optContent = `
+          <div style="font-weight: 700; color: #000000; font-size: ${optFontPt}; margin-bottom: 2px;">
+            <span>Q${qNum}. (Options):</span>
+          </div>
           ${isShort ? `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
@@ -1750,6 +1829,46 @@ export async function exportCompact2ColPdfTestPaper(
               <div>${optD}</div>
             </div>
           `}
+        `;
+      } else if (splitType === 'options_ab') {
+        optContent = `
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+          </div>
+        `;
+      } else if (splitType === 'options_cd') {
+        optContent = `
+          <div style="font-weight: 700; color: #000000; font-size: ${optFontPt}; margin-bottom: 2px;">
+            <span>Q${qNum}. (Contd):</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        `;
+      } else {
+        optContent = isShort ? `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        ` : `
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        `;
+      }
+
+      return `
+        <div style="padding: 2px 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
+          ${(splitType !== 'options_only' && splitType !== 'options_cd') ? qHeaderHtml : ''}
+          ${optContent}
         </div>
       `;
     }).join('');
@@ -1822,9 +1941,9 @@ export async function exportCompact2ColPdfTestPaper(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
-            <span>${escapeHtml(testTitle)}</span>
-            <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
+          <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
+            <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
+            <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages}</span>
           </div>
         `;
       }
@@ -1865,7 +1984,7 @@ export async function exportCompact2ColPdfTestPaper(
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const canvas = await html2canvas(pageDiv, {
-        scale: 3, // High-resolution (300 DPI) for crystal sharp text
+        scale: 4, // 400 DPI Ultra HD crystal sharpness
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
@@ -2076,6 +2195,7 @@ export async function exportCombinedBookletPdf(
     return items.map(item => {
       const qNum = item.originalIndex + 1;
       const q = item.question;
+      const splitType = item.splitType || 'full';
       const optA = `(A) ${escapeHtml(formatMathSymbols(q.optionA || ''))}`;
       const optB = `(B) ${escapeHtml(formatMathSymbols(q.optionB || ''))}`;
       const optC = `(C) ${escapeHtml(formatMathSymbols(q.optionC || ''))}`;
@@ -2083,16 +2203,25 @@ export async function exportCombinedBookletPdf(
 
       const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
-      return `
-        <div style="padding: 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
-          <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
-            <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+      const qHeaderHtml = `
+        <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px;">
+          <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+        </div>
+        ${shouldDisplayTranslation(q.question, q.translation) ? `
+          <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
+            ${escapeHtml(formatMathSymbols(q.translation!))}
           </div>
-          ${shouldDisplayTranslation(q.question, q.translation) ? `
-            <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
-              ${escapeHtml(formatMathSymbols(q.translation!))}
-            </div>
-          ` : ''}
+        ` : ''}
+      `;
+
+      let optContent = '';
+      if (splitType === 'question_only') {
+        optContent = '';
+      } else if (splitType === 'options_only') {
+        optContent = `
+          <div style="font-weight: 700; color: #000000; font-size: ${optFontPt}; margin-bottom: 2px;">
+            <span>Q${qNum}. (Options):</span>
+          </div>
           ${isShort ? `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
               <div>${optA}</div>
@@ -2108,6 +2237,46 @@ export async function exportCombinedBookletPdf(
               <div>${optD}</div>
             </div>
           `}
+        `;
+      } else if (splitType === 'options_ab') {
+        optContent = `
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+          </div>
+        `;
+      } else if (splitType === 'options_cd') {
+        optContent = `
+          <div style="font-weight: 700; color: #000000; font-size: ${optFontPt}; margin-bottom: 2px;">
+            <span>Q${qNum}. (Contd):</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        `;
+      } else {
+        optContent = isShort ? `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        ` : `
+          <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 2px;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
+          </div>
+        `;
+      }
+
+      return `
+        <div style="padding: 2px 4px; margin-bottom: ${qSpacing}; font-size: ${fontPt}; line-height: 1.35; box-sizing: border-box; position: relative; z-index: 1;">
+          ${(splitType !== 'options_only' && splitType !== 'options_cd') ? qHeaderHtml : ''}
+          ${optContent}
         </div>
       `;
     }).join('');
@@ -2179,9 +2348,9 @@ export async function exportCombinedBookletPdf(
         `;
       } else {
         headerHtml = `
-          <div style="margin-bottom: 5px; padding-bottom: 3px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000;">
-            <span>${escapeHtml(testTitle)}</span>
-            <span style="font-size: 10px; background: #000; color: #fff; padding: 1px 6px; border-radius: 2px;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
+          <div style="margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid #000000; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #000000; min-height: 24px; box-sizing: border-box;">
+            <span style="font-weight: 800; font-size: 11px; text-transform: uppercase;">${escapeHtml(testTitle)}</span>
+            <span style="display: inline-block; font-size: 9.5px; font-weight: 800; background: #000000; color: #ffffff; padding: 2px 8px; border-radius: 3px; line-height: 1.2;">PAGE ${page.pageNumber} OF ${page.totalPages + 1}</span>
           </div>
         `;
       }
@@ -2217,7 +2386,7 @@ export async function exportCombinedBookletPdf(
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const canvas = await html2canvas(pageDiv, {
-        scale: 3, // High-res 300 DPI for crystal clear text
+        scale: 4, // 400 DPI Ultra HD crystal sharpness
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
