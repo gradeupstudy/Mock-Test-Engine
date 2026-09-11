@@ -5,6 +5,7 @@ import { getStoredAiConfig } from '../lib/aiClient';
 import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset } from '../lib/db';
 import { syncMockHistoryToSupabase } from '../lib/supabaseClient';
 import { GenerationProgressModal } from './GenerationProgressModal';
+import { HtmlMockTestModal } from './HtmlMockTestModal';
 import {
   Sparkles,
   Layers,
@@ -28,7 +29,9 @@ import {
   Settings2,
   BookOpen,
   Edit3,
-  FileEdit
+  FileEdit,
+  Globe,
+  Youtube
 } from 'lucide-react';
 
 interface MockCreatorViewProps {
@@ -68,6 +71,9 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
   // Edit Blueprint Modal state
   const [isEditPresetModalOpen, setIsEditPresetModalOpen] = useState<boolean>(false);
   const [editingPreset, setEditingPreset] = useState<ExamPreset | null>(null);
+
+  // HTML Mock Test Modal state
+  const [isHtmlMockModalOpen, setIsHtmlMockModalOpen] = useState<boolean>(false);
 
   // Available subjects from imported questions
   const availableSubjects = useMemo(() => {
@@ -861,7 +867,17 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-2">
+          <div className="flex flex-wrap justify-end gap-3 pt-2">
+            <button
+              onClick={() => setIsHtmlMockModalOpen(true)}
+              className="flex items-center space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md hover:shadow-red-500/20 transition-all"
+              title="Export standalone interactive HTML Mock Test with YouTube Subscribe Gate"
+            >
+              <Globe className="w-4 h-4" />
+              <span>Export HTML Mock Test</span>
+              <Youtube className="w-3.5 h-3.5 text-red-200" />
+            </button>
+
             <button
               onClick={onNavigateToPreview}
               className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs shadow-md transition-colors"
@@ -1343,6 +1359,17 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Interactive HTML Mock Test Modal */}
+      {iqseResult && (
+        <HtmlMockTestModal
+          isOpen={isHtmlMockModalOpen}
+          onClose={() => setIsHtmlMockModalOpen(false)}
+          questions={iqseResult.selectedQuestions}
+          testName={testName}
+          duration={duration}
+          totalMarks={totalMarks}
+        />
       )}
     </div>
   );

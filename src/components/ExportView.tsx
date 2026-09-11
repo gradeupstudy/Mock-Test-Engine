@@ -16,6 +16,7 @@ import {
   printNativeCompactAnswerKey
 } from '../lib/exportUtils';
 import { PRESET_LOGOS } from '../lib/paperLogos';
+import { HtmlMockTestModal } from './HtmlMockTestModal';
 
 export function resolveMockQuestions(mock: MockHistory, allQuestions: Question[]): Question[] {
   // 1. If full question snapshot exists in mock.questions, return it directly!
@@ -58,7 +59,9 @@ import {
   Printer,
   Layers,
   Trash2,
-  Loader2
+  Loader2,
+  Youtube,
+  Sparkles
 } from 'lucide-react';
 
 interface ExportViewProps {
@@ -97,6 +100,21 @@ export const ExportView: React.FC<ExportViewProps> = ({
   const [isExporting2ColPdf, setIsExporting2ColPdf] = useState<boolean>(false);
   const [isExporting1PageKey, setIsExporting1PageKey] = useState<boolean>(false);
   const [isExportingCombined, setIsExportingCombined] = useState<boolean>(false);
+
+  // Standalone HTML Mock Test Modal State
+  const [isHtmlMockModalOpen, setIsHtmlMockModalOpen] = useState<boolean>(false);
+  const [htmlModalQuestions, setHtmlModalQuestions] = useState<Question[]>([]);
+  const [htmlModalTestName, setHtmlModalTestName] = useState<string>('');
+  const [htmlModalDuration, setHtmlModalDuration] = useState<number>(60);
+  const [htmlModalMarks, setHtmlModalMarks] = useState<number>(100);
+
+  const handleOpenHtmlMockModal = (qs: Question[], name: string, dur?: number, marks?: number) => {
+    setHtmlModalQuestions(qs);
+    setHtmlModalTestName(name);
+    setHtmlModalDuration(dur || activeDuration || 60);
+    setHtmlModalMarks(marks || activeMarks || qs.length * 2);
+    setIsHtmlMockModalOpen(true);
+  };
 
   const handleExport2ColPdf = async () => {
     if (currentQuestions.length === 0) {
@@ -420,6 +438,74 @@ export const ExportView: React.FC<ExportViewProps> = ({
         </div>
       </div>
 
+      {/* Featured Card 3: Interactive HTML Mock Test (Standalone CBT Exam with YouTube Gate) */}
+      <div className="bg-gradient-to-r from-[#200c14] via-[#2c0e18] to-[#160a12] border border-red-500/40 p-6 rounded-2xl shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+          <Youtube className="w-36 h-36 text-red-500" />
+        </div>
+
+        <div className="relative z-10 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-xl bg-red-500/20 border border-red-400/40 text-red-400 flex items-center justify-center shadow-inner">
+                <Globe className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-lg font-extrabold text-white">Interactive HTML Mock Test File</h3>
+                  <span className="text-[10px] font-extrabold bg-red-500/30 text-red-300 border border-red-400/40 px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center space-x-1">
+                    <Youtube className="w-3 h-3 text-red-400" />
+                    <span>YouTube Gate + Scorecard + PDF</span>
+                  </span>
+                </div>
+                <p className="text-xs text-red-100/80 mt-0.5 max-w-3xl">
+                  Generates a single, offline-ready <code>.html</code> file that students open in any browser or phone. Includes mandatory YouTube channel subscription gate, live CBT exam interface with countdown timer, question palette, bilingual mode, comprehensive scorecard, step-by-step Hindi explanations, result PDF download, and WhatsApp/Telegram share.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => handleOpenHtmlMockModal(currentQuestions, activeTestName, activeDuration, activeMarks)}
+              disabled={currentQuestions.length === 0}
+              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-[0.98]"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Configure & Export HTML</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+            <div className="bg-slate-950/60 border border-red-900/40 p-3 rounded-xl">
+              <span className="text-[10px] text-red-300/70 font-semibold block">Channel Subscribe Gate</span>
+              <strong className="text-white text-xs">Mandatory Gate</strong>
+            </div>
+            <div className="bg-slate-950/60 border border-red-900/40 p-3 rounded-xl">
+              <span className="text-[10px] text-red-300/70 font-semibold block">Exam Environment</span>
+              <strong className="text-white text-xs">Full CBT + Timer</strong>
+            </div>
+            <div className="bg-slate-950/60 border border-red-900/40 p-3 rounded-xl">
+              <span className="text-[10px] text-red-300/70 font-semibold block">Result Analysis</span>
+              <strong className="text-white text-xs">Scorecard + Solutions</strong>
+            </div>
+            <div className="bg-slate-950/60 border border-red-900/40 p-3 rounded-xl">
+              <span className="text-[10px] text-red-300/70 font-semibold block">Sharing & PDF</span>
+              <strong className="text-white text-xs">WhatsApp & Print PDF</strong>
+            </div>
+          </div>
+
+          <div className="flex items-center flex-wrap gap-3 pt-2">
+            <button
+              onClick={() => handleOpenHtmlMockModal(currentQuestions, activeTestName, activeDuration, activeMarks)}
+              disabled={currentQuestions.length === 0}
+              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center space-x-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download HTML Mock Test ({currentQuestions.length} Qs)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Main Standard Export Action Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* PDF Export Card */}
@@ -591,6 +677,15 @@ export const ExportView: React.FC<ExportViewProps> = ({
 
                   <div className="flex items-center space-x-2">
                     <button
+                      onClick={() => handleOpenHtmlMockModal(matchedQuestions, mock.testName, mock.duration, mock.marks)}
+                      className="flex items-center space-x-1.5 bg-red-950/60 hover:bg-red-600 text-red-200 hover:text-white border border-red-700/60 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      title="Export this mock test as an Interactive HTML file with YouTube Gate"
+                    >
+                      <Youtube className="w-3.5 h-3.5 text-red-400" />
+                      <span>HTML Test</span>
+                    </button>
+
+                    <button
                       onClick={() => handleExportAppOnlineMockTest(matchedQuestions, mock.testName)}
                       className="flex items-center space-x-1.5 bg-cyan-900/60 hover:bg-cyan-600 text-cyan-200 hover:text-white border border-cyan-700/60 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                       title="Export this mock test in App Online Word (.docx) format"
@@ -657,6 +752,15 @@ export const ExportView: React.FC<ExportViewProps> = ({
           </div>
         </div>
       )}
+      {/* Interactive HTML Mock Test Modal */}
+      <HtmlMockTestModal
+        isOpen={isHtmlMockModalOpen}
+        onClose={() => setIsHtmlMockModalOpen(false)}
+        questions={htmlModalQuestions.length > 0 ? htmlModalQuestions : currentQuestions}
+        testName={htmlModalTestName || activeTestName}
+        duration={htmlModalDuration || activeDuration}
+        totalMarks={htmlModalMarks || activeMarks}
+      />
     </div>
   );
 };

@@ -157,3 +157,16 @@ export interface ExamPreset {
   createdDate?: string;
   updatedDate?: string;
 }
+
+export interface HtmlMockTestConfig {
+  testName: string;
+  duration: number; // in minutes
+  totalMarks?: number;
+  positiveMarks: number;
+  negativeMarks: number;
+  youtubeChannelName: string;
+  youtubeChannelUrl: string;
+  enableYoutubeGate: boolean;
+  instituteName?: string;
+  instructions?: string;
+}

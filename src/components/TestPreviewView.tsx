@@ -6,6 +6,7 @@ import { getAllQuestions } from '../lib/db';
 import { McqInspectionModal, runStatic360Inspection } from './McqInspectionModal';
 import { MathText } from './MathText';
 import { MathToolbar } from './MathToolbar';
+import { HtmlMockTestModal } from './HtmlMockTestModal';
 import {
   FileCheck,
   Plus,
@@ -36,7 +37,9 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
-  Printer
+  Printer,
+  Globe,
+  Youtube
 } from 'lucide-react';
 
 // Helper: Extract Exam Category Name from Test Title (e.g. "HP Home Guard Mock Test - 24" -> "HP Home Guard")
@@ -93,6 +96,9 @@ export const TestPreviewView: React.FC<TestPreviewViewProps> = ({
   // Quick Jump to Position state
   const [jumpModalIdx, setJumpModalIdx] = useState<number | null>(null);
   const [targetPosInput, setTargetPosInput] = useState<string>('');
+
+  // Standalone HTML Mock Test modal
+  const [isHtmlMockModalOpen, setIsHtmlMockModalOpen] = useState<boolean>(false);
 
   // Smart Swap & Swipe Deck State
   const [smartSwappingIdx, setSmartSwappingIdx] = useState<number | null>(null);
@@ -1002,6 +1008,19 @@ Return ONLY valid JSON matching this schema:
               <span>Print Paper (2-Col)</span>
             </button>
           )}
+
+          <button
+            onClick={() => {
+              handleSaveAll();
+              setIsHtmlMockModalOpen(true);
+            }}
+            className="flex items-center space-x-1.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-md transition-all"
+            title="Export interactive HTML Mock Test file with YouTube Subscribe Gate"
+          >
+            <Globe className="w-4 h-4" />
+            <span>HTML Mock Test</span>
+            <Youtube className="w-3.5 h-3.5 text-red-200" />
+          </button>
 
           <button
             onClick={() => {
@@ -2558,6 +2577,15 @@ Return ONLY valid JSON matching this schema:
           </div>
         </div>
       )}
+      {/* Interactive HTML Mock Test Modal */}
+      <HtmlMockTestModal
+        isOpen={isHtmlMockModalOpen}
+        onClose={() => setIsHtmlMockModalOpen(false)}
+        questions={questions}
+        testName={testName}
+        duration={duration}
+        totalMarks={totalMarks}
+      />
     </div>
   );
 };
