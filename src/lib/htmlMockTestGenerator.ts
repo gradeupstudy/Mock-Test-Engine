@@ -1439,10 +1439,6 @@ export function generateInteractiveHtmlMockTest(
             </svg>
             <span>Subscribe on YouTube</span>
           </a>
-
-          <button id="btn-already-subscribed" type="button" class="btn btn-outline" onclick="verifySubscriptionManually()">
-            <span>I Have Subscribed / Already a Subscriber</span>
-          </button>
         </div>
 
         <div id="yt-unlocked-msg" class="gate-unlocked-banner hidden" style="margin-top: 1rem;">
