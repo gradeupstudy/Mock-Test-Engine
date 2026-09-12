@@ -1135,34 +1135,35 @@ export function generateInteractiveHtmlMockTest(
         print-color-adjust: exact !important;
       }
 
-      /* Fixed Repeating Gradeup Study Watermark on EVERY printed page */
+      /* Fixed Single Centered Gradeup Study Watermark on EVERY printed page */
       .print-watermark {
         display: flex !important;
-        flex-direction: column;
-        justify-content: space-around;
-        align-items: center;
+        align-items: center !important;
+        justify-content: center !important;
         position: fixed !important;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        z-index: 99999;
-        pointer-events: none;
-        user-select: none;
-        transform: rotate(-30deg);
-        overflow: hidden;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 99999 !important;
+        pointer-events: none !important;
+        user-select: none !important;
+        overflow: hidden !important;
       }
 
       .print-watermark .watermark-item {
         font-family: 'Plus Jakarta Sans', Arial, sans-serif !important;
-        font-size: 4.8rem !important;
+        font-size: 3.5rem !important;
         font-weight: 900 !important;
-        letter-spacing: 0.18em !important;
-        color: rgba(15, 23, 42, 0.08) !important;
+        letter-spacing: 0.08em !important;
+        color: rgba(15, 23, 42, 0.07) !important;
         text-transform: uppercase !important;
         white-space: nowrap !important;
-        line-height: 1.2;
-        margin: 2rem 0;
+        transform: rotate(-28deg) !important;
+        transform-origin: center center !important;
+        text-align: center !important;
+        line-height: 1 !important;
+        margin: 0 !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
@@ -1332,11 +1333,8 @@ export function generateInteractiveHtmlMockTest(
 </head>
 <body>
 
-  <!-- Fixed Repeating Gradeup Study Watermark for Print & PDF -->
+  <!-- Fixed Single Gradeup Study Watermark for Print & PDF -->
   <div class="print-watermark" aria-hidden="true">
-    <div class="watermark-item">GRADEUP STUDY</div>
-    <div class="watermark-item">GRADEUP STUDY</div>
-    <div class="watermark-item">GRADEUP STUDY</div>
     <div class="watermark-item">GRADEUP STUDY</div>
   </div>
 
