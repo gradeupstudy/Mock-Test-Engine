@@ -9,7 +9,7 @@ export const DEFAULT_HTML_TEST_CONFIG: HtmlMockTestConfig = {
   youtubeChannelName: 'Gradeup Study',
   youtubeChannelUrl: 'https://www.youtube.com/@GradeupStudy?sub_confirmation=1',
   enableYoutubeGate: true,
-  instituteName: 'Gradeup Study Library',
+  instituteName: 'Gradeup Study',
   instructions: 'Attempt all questions within the given time. Each correct answer carries marks as specified. Negative marking applies for wrong answers.'
 };
 
@@ -18,7 +18,10 @@ export function getStoredHtmlMockTestConfig(): HtmlMockTestConfig {
     const raw = localStorage.getItem('gradeup_html_test_config');
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { ...DEFAULT_HTML_TEST_CONFIG, ...parsed };
+      if (parsed.instituteName === 'Gradeup Study Library' || !parsed.instituteName) {
+        parsed.instituteName = 'Gradeup Study';
+      }
+      return { ...DEFAULT_HTML_TEST_CONFIG, ...parsed, instituteName: parsed.instituteName };
     }
   } catch (e) {
     console.warn('Failed to load stored html test config:', e);
@@ -30,6 +33,9 @@ export function saveStoredHtmlMockTestConfig(config: Partial<HtmlMockTestConfig>
   try {
     const current = getStoredHtmlMockTestConfig();
     const updated = { ...current, ...config };
+    if (updated.instituteName === 'Gradeup Study Library') {
+      updated.instituteName = 'Gradeup Study';
+    }
     localStorage.setItem('gradeup_html_test_config', JSON.stringify(updated));
   } catch (e) {
     console.warn('Failed to save html test config:', e);
@@ -49,9 +55,14 @@ export function generateInteractiveHtmlMockTest(
   questions: Question[],
   config: Partial<HtmlMockTestConfig>
 ): string {
+  const resolvedInstituteName = (config.instituteName && config.instituteName !== 'Gradeup Study Library')
+    ? config.instituteName
+    : 'Gradeup Study';
+
   const mergedConfig: HtmlMockTestConfig = {
     ...DEFAULT_HTML_TEST_CONFIG,
     ...config,
+    instituteName: resolvedInstituteName,
     totalMarks: config.totalMarks || questions.length * (config.positiveMarks || 1)
   };
 
@@ -998,45 +1009,283 @@ export function generateInteractiveHtmlMockTest(
       transform: translateY(-1px);
     }
 
+    /* Gradeup Study Official Scorecard & PDF Header */
+    .pdf-gradeup-header {
+      background: #ffffff;
+      border: 1.5px solid var(--border);
+      border-radius: 1rem;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .pdf-header-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .pdf-logo-box {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .pdf-institute-name {
+      font-size: 1.35rem;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: 0.04em;
+      line-height: 1.2;
+    }
+    .pdf-institute-tagline {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #64748b;
+      margin-top: 0.15rem;
+    }
+    .pdf-header-badges {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .pdf-badge-verified {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #15803d;
+      background: #dcfce7;
+      border: 1px solid #bbf7d0;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .pdf-badge-yt {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #b91c1c;
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    /* Print Watermark (Hidden on screen) */
+    .print-watermark {
+      display: none;
+    }
+
+    .pdf-print-footer {
+      display: none;
+    }
+
     /* Print Styles */
     @media print {
+      @page {
+        margin: 8mm 10mm 12mm 10mm;
+        size: A4 portrait;
+      }
+
       body {
         background: #ffffff !important;
-        color: #000000 !important;
+        color: #0f172a !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
+
+      /* Fixed Repeating Gradeup Study Watermark on EVERY printed page */
+      .print-watermark {
+        display: flex !important;
+        flex-direction: column;
+        justify-content: space-around;
+        align-items: center;
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 99999;
+        pointer-events: none;
+        user-select: none;
+        transform: rotate(-30deg);
+        overflow: hidden;
+      }
+
+      .print-watermark .watermark-item {
+        font-family: 'Plus Jakarta Sans', Arial, sans-serif !important;
+        font-size: 4.8rem !important;
+        font-weight: 900 !important;
+        letter-spacing: 0.18em !important;
+        color: rgba(15, 23, 42, 0.08) !important;
+        text-transform: uppercase !important;
+        white-space: nowrap !important;
+        line-height: 1.2;
+        margin: 2rem 0;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      /* Official Gradeup Study Header in Print/PDF */
+      .pdf-gradeup-header {
+        display: flex !important;
+        align-items: center;
+        justify-content: space-between;
+        background: #f8fafc !important;
+        border: 2px solid #0f172a !important;
+        border-radius: 8px !important;
+        padding: 0.85rem 1.25rem !important;
+        margin-bottom: 1rem !important;
+        page-break-inside: avoid;
+        box-shadow: none !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .pdf-institute-name {
+        font-size: 1.6rem !important;
+        font-weight: 900 !important;
+        color: #0f172a !important;
+        letter-spacing: 0.05em !important;
+        line-height: 1.1;
+      }
+
+      .pdf-institute-tagline {
+        color: #334155 !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+      }
+
+      .pdf-badge-verified {
+        color: #15803d !important;
+        background: #dcfce7 !important;
+        border: 1px solid #86efac !important;
+        font-weight: 800 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .pdf-badge-yt {
+        color: #b91c1c !important;
+        background: #fee2e2 !important;
+        border: 1px solid #fca5a5 !important;
+        font-weight: 800 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      /* Official PDF Print Footer */
+      .pdf-print-footer {
+        display: flex !important;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1.5px solid #0f172a !important;
+        padding-top: 8px !important;
+        margin-top: 1.5rem !important;
+        font-size: 0.75rem !important;
+        color: #475569 !important;
+        page-break-inside: avoid;
+      }
+
+      /* Hide interactive buttons & exam elements */
       header.exam-header,
       .result-actions-bar,
       .review-filter-tabs,
       .btn,
-      .modal-backdrop {
+      .modal-backdrop,
+      #screen-welcome,
+      #screen-exam {
         display: none !important;
       }
+
+      #screen-result {
+        display: block !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: 100% !important;
+      }
+
       .result-hero {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        border: 1.5px solid #0f172a !important;
+        box-shadow: none !important;
+        padding: 1rem 1.25rem !important;
+        margin-bottom: 1rem !important;
+        page-break-inside: avoid;
+      }
+
+      .score-big {
+        color: #0f172a !important;
+      }
+
+      .score-circle-card {
         background: #f8fafc !important;
-        color: #000000 !important;
-        border: 2px solid #000000 !important;
-        box-shadow: none !important;
-        padding: 1.25rem !important;
+        border: 1.5px solid #cbd5e1 !important;
+        color: #0f172a !important;
       }
-      .score-big { color: #000000 !important; }
-      .candidate-tag { color: #000000 !important; border: 1px solid #000 !important; }
+
+      .candidate-tag {
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1 !important;
+        background: #f1f5f9 !important;
+      }
+
+      .stats-grid {
+        margin-bottom: 1rem !important;
+        page-break-inside: avoid;
+      }
+
       .stat-card {
-        border: 1px solid #000000 !important;
+        border: 1px solid #94a3b8 !important;
+        background: #ffffff !important;
         box-shadow: none !important;
+        page-break-inside: avoid;
       }
+
       .review-section {
         border: none !important;
         box-shadow: none !important;
         padding: 0 !important;
       }
+
       .review-item-card {
-        page-break-inside: avoid;
-        border: 1px solid #cccccc !important;
+        page-break-inside: avoid !important;
+        border: 1px solid #cbd5e1 !important;
+        margin-bottom: 1rem !important;
+        background: #ffffff !important;
+      }
+
+      .explanation-box {
+        background: #f0fdfa !important;
+        border-left: 3px solid #0d9488 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
     }
   </style>
 </head>
 <body>
+
+  <!-- Fixed Repeating Gradeup Study Watermark for Print & PDF -->
+  <div class="print-watermark" aria-hidden="true">
+    <div class="watermark-item">GRADEUP STUDY</div>
+    <div class="watermark-item">GRADEUP STUDY</div>
+    <div class="watermark-item">GRADEUP STUDY</div>
+    <div class="watermark-item">GRADEUP STUDY</div>
+  </div>
 
   <!-- Top App Navigation Bar -->
   <header class="exam-header">
@@ -1047,7 +1296,7 @@ export function generateInteractiveHtmlMockTest(
           <path d="M6 6h10"/>
           <path d="M6 10h10"/>
         </svg>
-        <span id="nav-brand-text">${escapeHtml(mergedConfig.instituteName || 'Gradeup Study')}</span>
+        <span id="nav-brand-text">Gradeup Study</span>
         <span class="brand-badge">Online CBT</span>
       </div>
 
@@ -1320,12 +1569,33 @@ export function generateInteractiveHtmlMockTest(
        SCREEN 3: PROFESSIONAL EXAM RESULT & SCORECARD PLATFORM
        ========================================================================= -->
   <main id="screen-result" class="screen-container hidden">
+    <!-- Official Gradeup Study Header Banner (Screen View + PDF Print Header) -->
+    <div class="pdf-gradeup-header">
+      <div class="pdf-header-brand">
+        <div class="pdf-logo-box">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+            <path d="M6 6h10"/>
+            <path d="M6 10h10"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="pdf-institute-name">GRADEUP STUDY</h1>
+          <p class="pdf-institute-tagline">Official Computer Based Test (CBT) • Performance Evaluation Report</p>
+        </div>
+      </div>
+      <div class="pdf-header-badges">
+        <span class="pdf-badge-verified">✓ Official Scorecard</span>
+        <span class="pdf-badge-yt">YouTube: @GradeupStudy</span>
+      </div>
+    </div>
+
     <!-- Hero Scorecard Card -->
     <div class="result-hero">
       <div class="result-hero-inner">
         <div class="hero-info">
           <h2 id="result-test-title">${escapeHtml(mergedConfig.testName)}</h2>
-          <p id="result-meta-line">Computer Based Test • Performance Evaluation Report</p>
+          <p id="result-meta-line">Gradeup Study • CBT Performance Evaluation Report</p>
           <div class="candidate-tag">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
             <span id="result-candidate-name">Candidate Name</span>
@@ -1405,6 +1675,16 @@ export function generateInteractiveHtmlMockTest(
       <!-- Review Questions List -->
       <div id="review-questions-list">
         <!-- Injected by JavaScript -->
+      </div>
+    </div>
+
+    <!-- Official Gradeup Study PDF Print Footer -->
+    <div class="pdf-print-footer">
+      <div>
+        <strong>GRADEUP STUDY</strong> • Examination Cell & Official Mock Test Series
+      </div>
+      <div>
+        Report Generated: <span id="pdf-gen-date"></span> | YouTube: @GradeupStudy
       </div>
     </div>
   </main>
@@ -1813,6 +2093,14 @@ export function generateInteractiveHtmlMockTest(
       document.getElementById('filter-incorrect').textContent = 'Incorrect (' + incorrect + ')';
       document.getElementById('filter-unattempted').textContent = 'Unattempted (' + unattempted + ')';
 
+      // Update Report Generation Date
+      try {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const dateEl = document.getElementById('pdf-gen-date');
+        if (dateEl) dateEl.textContent = dateStr;
+      } catch (e) {}
+
       // Render Question Reviews
       renderReviewQuestions();
     }
@@ -1905,6 +2193,12 @@ export function generateInteractiveHtmlMockTest(
 
     // PDF Download via Print Engine
     function downloadResultPdf() {
+      try {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const dateEl = document.getElementById('pdf-gen-date');
+        if (dateEl) dateEl.textContent = dateStr;
+      } catch (e) {}
       window.print();
     }
 

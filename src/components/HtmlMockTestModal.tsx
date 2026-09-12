@@ -41,8 +41,12 @@ export const HtmlMockTestModal: React.FC<HtmlMockTestModalProps> = ({
 }) => {
   const [config, setConfig] = useState<HtmlMockTestConfig>(() => {
     const stored = getStoredHtmlMockTestConfig();
+    const instName = (stored.instituteName && stored.instituteName !== 'Gradeup Study Library')
+      ? stored.instituteName
+      : 'Gradeup Study';
     return {
       ...stored,
+      instituteName: instName,
       testName: testName || stored.testName,
       duration: duration || stored.duration,
       totalMarks: totalMarks || questions.length * (stored.positiveMarks || 1)
@@ -55,13 +59,21 @@ export const HtmlMockTestModal: React.FC<HtmlMockTestModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       const stored = getStoredHtmlMockTestConfig();
-      setConfig(prev => ({
-        ...stored,
-        ...prev,
-        testName: testName || prev.testName,
-        duration: duration || prev.duration,
-        totalMarks: totalMarks || questions.length * (prev.positiveMarks || 1)
-      }));
+      setConfig(prev => {
+        const instName = (prev.instituteName && prev.instituteName !== 'Gradeup Study Library')
+          ? prev.instituteName
+          : (stored.instituteName && stored.instituteName !== 'Gradeup Study Library')
+            ? stored.instituteName
+            : 'Gradeup Study';
+        return {
+          ...stored,
+          ...prev,
+          instituteName: instName,
+          testName: testName || prev.testName,
+          duration: duration || prev.duration,
+          totalMarks: totalMarks || questions.length * (prev.positiveMarks || 1)
+        };
+      });
     }
   }, [isOpen, testName, duration, totalMarks, questions.length]);
 

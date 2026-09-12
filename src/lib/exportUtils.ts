@@ -1221,7 +1221,7 @@ export function exportDocxAnswerKey(
   testNameOverride?: string
 ) {
   const h = template?.header || {
-    instituteName: 'Gradeup Study Library & Test Institute',
+    instituteName: 'Gradeup Study & Test Institute',
     examName: 'Competitive Examination Series',
     testName: testNameOverride || 'Model Mock Test Paper Answer Key & Solutions'
   };
