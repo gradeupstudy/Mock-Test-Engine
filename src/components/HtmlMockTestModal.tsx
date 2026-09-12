@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Question, HtmlMockTestConfig } from '../types';
 import {
   generateInteractiveHtmlMockTest,
   getStoredHtmlMockTestConfig,
   saveStoredHtmlMockTestConfig,
-  DEFAULT_HTML_TEST_CONFIG
+  DEFAULT_HTML_TEST_CONFIG,
+  DEFAULT_GRADEUP_LOGO_DATA_URL
 } from '../lib/htmlMockTestGenerator';
 import {
   Globe,
@@ -19,7 +20,11 @@ import {
   ShieldAlert,
   FileCheck,
   Sparkles,
-  Share2
+  Share2,
+  Upload,
+  Image as ImageIcon,
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
 
 interface HtmlMockTestModalProps {
@@ -55,6 +60,30 @@ export const HtmlMockTestModal: React.FC<HtmlMockTestModalProps> = ({
 
   const [copied, setCopied] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      alert('Please choose a logo image smaller than 3MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      handleConfigChange('logoUrl', dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleResetDefaultLogo = () => {
+    handleConfigChange('logoUrl', DEFAULT_GRADEUP_LOGO_DATA_URL);
+  };
+
+  const handleRemoveLogo = () => {
+    handleConfigChange('logoUrl', '');
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -238,6 +267,87 @@ export const HtmlMockTestModal: React.FC<HtmlMockTestModalProps> = ({
               <label className="text-slate-300 block mb-1 font-semibold">Total Calculated Marks</label>
               <div className="bg-slate-950 border border-slate-800 text-emerald-400 rounded-xl p-2.5 text-xs font-bold">
                 {questions.length * config.positiveMarks} Marks ({questions.length} MCQs)
+              </div>
+            </div>
+          </div>
+
+          {/* Brand Logo Upload & CBT Header Preview Box */}
+          <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div>
+                <label className="text-white font-bold flex items-center space-x-1.5 text-xs">
+                  <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Gradeup Study Brand Logo (लोगो अपलोड)</span>
+                </label>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  यह लोगो HTML मॉक टेस्ट के टॉप हेडर में <strong>Gradeup Study</strong> के लेफ्ट साइड और PDF स्कोरकार्ड में दिखेगा।
+                </p>
+              </div>
+
+              {/* Upload & Action Buttons */}
+              <div className="flex items-center space-x-2 shrink-0">
+                <input
+                  type="file"
+                  ref={logoInputRef}
+                  onChange={handleLogoFileUpload}
+                  accept="image/png, image/jpeg, image/jpg, image/svg+xml, image/webp"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => logoInputRef.current?.click()}
+                  className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors shadow-sm"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{config.logoUrl ? 'Change Logo Image' : 'Upload Logo'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetDefaultLogo}
+                  title="Gradeup Study का आधिकारिक बैज रिस्टोर करें"
+                  className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg text-xs transition-colors border border-slate-700"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-400" />
+                  <span className="hidden sm:inline">Official Badge</span>
+                </button>
+
+                {config.logoUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveLogo}
+                    title="Logo हटाएं"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-rose-950/40 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Live WYSIWYG Header Preview */}
+            <div className="p-3 bg-white rounded-lg border border-slate-300 flex items-center justify-between shadow-sm">
+              <div className="flex items-center space-x-2.5">
+                {config.logoUrl ? (
+                  <img
+                    src={config.logoUrl}
+                    alt="Brand Logo"
+                    className="h-8 max-w-[48px] w-auto object-contain rounded bg-white shadow-xs"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 text-[10px] font-bold">
+                    Logo
+                  </div>
+                )}
+                <span className="font-black text-slate-900 text-sm tracking-tight">Gradeup Study</span>
+                <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                  Online CBT
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-1.5 text-[11px] text-slate-500 font-medium">
+                <Check className="w-3 h-3 text-emerald-600" />
+                <span>Header & Scorecard Ready</span>
               </div>
             </div>
           </div>

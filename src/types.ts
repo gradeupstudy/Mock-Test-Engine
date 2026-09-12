@@ -169,4 +169,5 @@ export interface HtmlMockTestConfig {
   enableYoutubeGate: boolean;
   instituteName?: string;
   instructions?: string;
+  logoUrl?: string; // Data URL or URL of uploaded brand logo
 }

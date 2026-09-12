@@ -1,5 +1,8 @@
 import { Question, HtmlMockTestConfig } from '../types';
 import { formatMathSymbols } from './mathUtils';
+import { GRADEUP_STUDY_LOGO_SVG, svgToDataUrl } from './paperLogos';
+
+export const DEFAULT_GRADEUP_LOGO_DATA_URL = svgToDataUrl(GRADEUP_STUDY_LOGO_SVG);
 
 export const DEFAULT_HTML_TEST_CONFIG: HtmlMockTestConfig = {
   testName: 'Online CBT Mock Test',
@@ -10,7 +13,8 @@ export const DEFAULT_HTML_TEST_CONFIG: HtmlMockTestConfig = {
   youtubeChannelUrl: 'https://www.youtube.com/@GradeupStudy?sub_confirmation=1',
   enableYoutubeGate: true,
   instituteName: 'Gradeup Study',
-  instructions: 'Attempt all questions within the given time. Each correct answer carries marks as specified. Negative marking applies for wrong answers.'
+  instructions: 'Attempt all questions within the given time. Each correct answer carries marks as specified. Negative marking applies for wrong answers.',
+  logoUrl: DEFAULT_GRADEUP_LOGO_DATA_URL
 };
 
 export function getStoredHtmlMockTestConfig(): HtmlMockTestConfig {
@@ -20,6 +24,9 @@ export function getStoredHtmlMockTestConfig(): HtmlMockTestConfig {
       const parsed = JSON.parse(raw);
       if (parsed.instituteName === 'Gradeup Study Library' || !parsed.instituteName) {
         parsed.instituteName = 'Gradeup Study';
+      }
+      if (parsed.logoUrl === undefined) {
+        parsed.logoUrl = DEFAULT_GRADEUP_LOGO_DATA_URL;
       }
       return { ...DEFAULT_HTML_TEST_CONFIG, ...parsed, instituteName: parsed.instituteName };
     }
@@ -59,10 +66,13 @@ export function generateInteractiveHtmlMockTest(
     ? config.instituteName
     : 'Gradeup Study';
 
+  const resolvedLogoUrl = config.logoUrl !== undefined ? config.logoUrl : DEFAULT_GRADEUP_LOGO_DATA_URL;
+
   const mergedConfig: HtmlMockTestConfig = {
     ...DEFAULT_HTML_TEST_CONFIG,
     ...config,
     instituteName: resolvedInstituteName,
+    logoUrl: resolvedLogoUrl,
     totalMarks: config.totalMarks || questions.length * (config.positiveMarks || 1)
   };
 
@@ -171,7 +181,18 @@ export function generateInteractiveHtmlMockTest(
       color: #0f172a;
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.65rem;
+    }
+    .brand-logo-img {
+      height: 34px;
+      max-width: 48px;
+      width: auto;
+      object-fit: contain;
+      border-radius: 6px;
+      flex-shrink: 0;
+      display: inline-block;
+      vertical-align: middle;
+      background: #ffffff;
     }
     .brand-badge {
       background: #eff6ff;
@@ -1029,8 +1050,8 @@ export function generateInteractiveHtmlMockTest(
       gap: 0.85rem;
     }
     .pdf-logo-box {
-      width: 44px;
-      height: 44px;
+      width: 48px;
+      height: 48px;
       border-radius: 10px;
       background: #eff6ff;
       border: 1px solid #bfdbfe;
@@ -1038,6 +1059,14 @@ export function generateInteractiveHtmlMockTest(
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      padding: 2px;
+      overflow: hidden;
+    }
+    .pdf-logo-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border-radius: 6px;
     }
     .pdf-institute-name {
       font-size: 1.35rem;
@@ -1150,6 +1179,30 @@ export function generateInteractiveHtmlMockTest(
         margin-bottom: 1rem !important;
         page-break-inside: avoid;
         box-shadow: none !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .pdf-logo-box {
+        width: 48px !important;
+        height: 48px !important;
+        background: #ffffff !important;
+        border: 1.5px solid #0f172a !important;
+        border-radius: 6px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 2px !important;
+        overflow: hidden !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .pdf-logo-box img,
+      .pdf-logo-img {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: contain !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
@@ -1291,11 +1344,15 @@ export function generateInteractiveHtmlMockTest(
   <header class="exam-header">
     <div class="header-inner">
       <div class="brand-title">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-          <path d="M6 6h10"/>
-          <path d="M6 10h10"/>
-        </svg>
+        ${mergedConfig.logoUrl ? `
+          <img src="${mergedConfig.logoUrl}" alt="Gradeup Study Logo" class="brand-logo-img" />
+        ` : `
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+            <path d="M6 6h10"/>
+            <path d="M6 10h10"/>
+          </svg>
+        `}
         <span id="nav-brand-text">Gradeup Study</span>
         <span class="brand-badge">Online CBT</span>
       </div>
@@ -1334,8 +1391,15 @@ export function generateInteractiveHtmlMockTest(
   <main id="screen-welcome" class="screen-container">
     <div class="welcome-card">
       <div class="welcome-header">
-        <h1 id="welcome-test-title">${escapeHtml(mergedConfig.testName)}</h1>
-        <p>${escapeHtml(mergedConfig.instituteName || 'Gradeup Study')} • Official Computer-Based Mock Test</p>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 0.85rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+          ${mergedConfig.logoUrl ? `
+            <img src="${mergedConfig.logoUrl}" alt="Gradeup Study Logo" style="height: 48px; max-width: 60px; object-fit: contain; border-radius: 8px; flex-shrink: 0;" />
+          ` : ''}
+          <div style="text-align: left;">
+            <h1 id="welcome-test-title" style="margin-bottom: 0.15rem; font-size: 1.5rem;">${escapeHtml(mergedConfig.testName)}</h1>
+            <p style="margin-bottom: 0; font-size: 0.85rem; color: #64748b;">${escapeHtml(mergedConfig.instituteName || 'Gradeup Study')} • Official Computer-Based Mock Test</p>
+          </div>
+        </div>
         
         <div class="test-meta-pills">
           <div class="meta-pill">
@@ -1573,11 +1637,15 @@ export function generateInteractiveHtmlMockTest(
     <div class="pdf-gradeup-header">
       <div class="pdf-header-brand">
         <div class="pdf-logo-box">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-            <path d="M6 6h10"/>
-            <path d="M6 10h10"/>
-          </svg>
+          ${mergedConfig.logoUrl ? `
+            <img src="${mergedConfig.logoUrl}" alt="Gradeup Study Logo" class="pdf-logo-img" />
+          ` : `
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+              <path d="M6 6h10"/>
+              <path d="M6 10h10"/>
+            </svg>
+          `}
         </div>
         <div>
           <h1 class="pdf-institute-name">GRADEUP STUDY</h1>
