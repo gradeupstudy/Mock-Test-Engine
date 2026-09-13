@@ -5,7 +5,8 @@ import {
   getStoredHtmlMockTestConfig,
   saveStoredHtmlMockTestConfig,
   DEFAULT_HTML_TEST_CONFIG,
-  DEFAULT_GRADEUP_LOGO_DATA_URL
+  DEFAULT_GRADEUP_LOGO_DATA_URL,
+  extractYoutubeVideoId
 } from '../lib/htmlMockTestGenerator';
 import {
   Globe,
@@ -24,7 +25,8 @@ import {
   Upload,
   Image as ImageIcon,
   RotateCcw,
-  Trash2
+  Trash2,
+  Play
 } from 'lucide-react';
 
 interface HtmlMockTestModalProps {
@@ -403,6 +405,125 @@ export const HtmlMockTestModal: React.FC<HtmlMockTestModalProps> = ({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* YouTube Video Solution Box (Result Screen Feature) */}
+          <div className="p-4 bg-gradient-to-r from-red-950/40 via-slate-950 to-slate-950 border border-red-500/40 rounded-xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-6 h-6 rounded-md bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-500">
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                </div>
+                <div>
+                  <span className="font-bold text-white text-xs">YouTube Video Solution (रिजल्ट स्क्रीन वीडियो हल)</span>
+                  <span className="ml-2 text-[10px] bg-red-500/20 text-red-400 font-semibold px-2 py-0.5 rounded-full border border-red-500/30">
+                    Result Screen Feature
+                  </span>
+                </div>
+              </div>
+
+              {config.youtubeSolutionUrl && (
+                <div className="flex items-center space-x-2">
+                  <a
+                    href={config.youtubeSolutionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 text-[11px] text-red-400 hover:text-red-300 font-medium hover:underline"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Test Link</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleConfigChange('youtubeSolutionUrl', '');
+                      handleConfigChange('youtubeSolutionTitle', '');
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-rose-400 font-medium"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              छात्र जब HTML मॉक टेस्ट सबमिट करेगा, तो रिजल्ट पेज पर इस वीडियो का <strong>थंबनेल और प्ले बटन</strong> दिखेगा। छात्र उस पर क्लिक करके सीधे YouTube पर पूरा वीडियो सॉल्यूशन देख सकेगा।
+            </p>
+
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-slate-300 block mb-1 font-medium text-[11px]">
+                  YouTube Video Link (वीडियो लिंक / URL)
+                </label>
+                <input
+                  type="text"
+                  value={config.youtubeSolutionUrl || ''}
+                  onChange={e => handleConfigChange('youtubeSolutionUrl', e.target.value)}
+                  placeholder="उदा. https://www.youtube.com/watch?v=... या https://youtu.be/..."
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2.5 text-xs focus:outline-none focus:border-red-500 font-mono text-[11px]"
+                />
+              </div>
+
+              {config.youtubeSolutionUrl && (
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium text-[11px]">
+                    Video Title (वैकल्पिक वीडियो शीर्षक)
+                  </label>
+                  <input
+                    type="text"
+                    value={config.youtubeSolutionTitle || ''}
+                    onChange={e => handleConfigChange('youtubeSolutionTitle', e.target.value)}
+                    placeholder={`उदा. ${config.testName} - Complete Video Solution & Discussion`}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              )}
+
+              {/* Video Thumbnail Live Preview if URL entered */}
+              {config.youtubeSolutionUrl && (() => {
+                const vid = extractYoutubeVideoId(config.youtubeSolutionUrl);
+                if (vid) {
+                  return (
+                    <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg flex items-center gap-3">
+                      <div className="relative w-28 aspect-video bg-black rounded-md overflow-hidden shrink-0 border border-slate-700">
+                        <img
+                          src={`https://img.youtube.com/vi/${vid}/hqdefault.jpg`}
+                          alt="Video Preview"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${vid}/mqdefault.jpg`;
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                          <div className="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg">
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-1 text-emerald-400 text-[11px] font-semibold">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>YouTube Video Connected</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-medium truncate mt-0.5">
+                          Video ID: <span className="font-mono text-white">{vid}</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          रिजल्ट पेज पर छात्र इस थंबनेल पर क्लिक करके सीधे इसी वीडियो पर पहुंचेंगे।
+                        </p>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="text-[11px] text-amber-400 flex items-center space-x-1">
+                      <span>कृपया सही YouTube लिंक दर्ज करें (उदा. https://www.youtube.com/watch?v=... या https://youtu.be/...)</span>
+                    </div>
+                  );
+                }
+              })()}
+            </div>
           </div>
 
           {/* Feature Highlights Pill Grid */}

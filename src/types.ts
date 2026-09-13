@@ -170,4 +170,6 @@ export interface HtmlMockTestConfig {
   instituteName?: string;
   instructions?: string;
   logoUrl?: string; // Data URL or URL of uploaded brand logo
+  youtubeSolutionUrl?: string; // YouTube video link for complete mock test solution
+  youtubeSolutionTitle?: string; // Optional custom title for solution video
 }

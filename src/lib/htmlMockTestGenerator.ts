@@ -14,8 +14,21 @@ export const DEFAULT_HTML_TEST_CONFIG: HtmlMockTestConfig = {
   enableYoutubeGate: true,
   instituteName: 'Gradeup Study',
   instructions: 'Attempt all questions within the given time. Each correct answer carries marks as specified. Negative marking applies for wrong answers.',
-  logoUrl: DEFAULT_GRADEUP_LOGO_DATA_URL
+  logoUrl: DEFAULT_GRADEUP_LOGO_DATA_URL,
+  youtubeSolutionUrl: '',
+  youtubeSolutionTitle: ''
 };
+
+export function extractYoutubeVideoId(url?: string | null): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const regExp = /(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+  const match = trimmed.match(regExp);
+  return match ? match[1] : null;
+}
 
 export function getStoredHtmlMockTestConfig(): HtmlMockTestConfig {
   try {
@@ -27,6 +40,9 @@ export function getStoredHtmlMockTestConfig(): HtmlMockTestConfig {
       }
       if (parsed.logoUrl === undefined) {
         parsed.logoUrl = DEFAULT_GRADEUP_LOGO_DATA_URL;
+      }
+      if (parsed.youtubeSolutionUrl === undefined) {
+        parsed.youtubeSolutionUrl = '';
       }
       return { ...DEFAULT_HTML_TEST_CONFIG, ...parsed, instituteName: parsed.instituteName };
     }
@@ -73,8 +89,14 @@ export function generateInteractiveHtmlMockTest(
     ...config,
     instituteName: resolvedInstituteName,
     logoUrl: resolvedLogoUrl,
+    youtubeSolutionUrl: config.youtubeSolutionUrl || '',
+    youtubeSolutionTitle: config.youtubeSolutionTitle || '',
     totalMarks: config.totalMarks || questions.length * (config.positiveMarks || 1)
   };
+
+  const videoSolutionId = mergedConfig.youtubeSolutionUrl ? extractYoutubeVideoId(mergedConfig.youtubeSolutionUrl) : null;
+  const videoSolutionUrl = mergedConfig.youtubeSolutionUrl ? mergedConfig.youtubeSolutionUrl.trim() : '';
+  const videoSolutionTitle = mergedConfig.youtubeSolutionTitle?.trim() || `${mergedConfig.testName} - Complete Video Solution`;
 
   // Sanitize and format questions with math symbols
   const formattedQuestions = questions.map((q, idx) => ({
@@ -890,6 +912,145 @@ export function generateInteractiveHtmlMockTest(
       flex-wrap: wrap;
     }
 
+    /* YouTube Complete Video Solution Card on Result Screen */
+    .video-solution-card {
+      background: linear-gradient(135deg, #090d16 0%, #172033 100%);
+      border: 2px solid #dc2626;
+      border-radius: 1.15rem;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      position: relative;
+      overflow: hidden;
+      text-decoration: none;
+      color: inherit;
+      transition: all 0.25s ease;
+      cursor: pointer;
+    }
+    @media (min-width: 640px) {
+      .video-solution-card {
+        flex-direction: row;
+        align-items: center;
+      }
+    }
+    .video-solution-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 32px -4px rgba(220, 38, 38, 0.35), 0 10px 15px -6px rgba(0, 0, 0, 0.25);
+      border-color: #ef4444;
+    }
+    .video-thumb-container {
+      position: relative;
+      width: 100%;
+      max-width: 270px;
+      aspect-ratio: 16 / 9;
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: #000000;
+      flex-shrink: 0;
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    @media (max-width: 639px) {
+      .video-thumb-container {
+        max-width: 100%;
+      }
+    }
+    .video-thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.3s ease;
+    }
+    .video-solution-card:hover .video-thumb-img {
+      transform: scale(1.05);
+    }
+    .video-play-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s ease;
+    }
+    .video-solution-card:hover .video-play-overlay {
+      background: rgba(0, 0, 0, 0.15);
+    }
+    .video-play-btn {
+      width: 52px;
+      height: 52px;
+      border-radius: 9999px;
+      background: #dc2626;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(220, 38, 38, 0.7);
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .video-solution-card:hover .video-play-btn {
+      transform: scale(1.12);
+      background: #ef4444;
+    }
+    .video-solution-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.45rem;
+    }
+    .video-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      background: rgba(220, 38, 38, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #fca5a5;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      width: fit-content;
+    }
+    .video-solution-title {
+      color: #ffffff;
+      font-size: 1.18rem;
+      font-weight: 800;
+      line-height: 1.35;
+      margin: 0;
+    }
+    .video-solution-desc {
+      color: #cbd5e1;
+      font-size: 0.83rem;
+      line-height: 1.5;
+      margin: 0;
+    }
+    .video-action-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #dc2626;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 0.86rem;
+      padding: 0.6rem 1.25rem;
+      border-radius: 0.6rem;
+      width: fit-content;
+      margin-top: 0.35rem;
+      transition: all 0.2s ease;
+      box-shadow: 0 3px 10px rgba(220, 38, 38, 0.4);
+    }
+    .video-solution-card:hover .video-action-cta {
+      background: #ef4444;
+      transform: translateX(2px);
+    }
+
     /* Review Solutions */
     .review-section {
       background: #ffffff;
@@ -1257,6 +1418,7 @@ export function generateInteractiveHtmlMockTest(
       header.exam-header,
       .result-actions-bar,
       .review-filter-tabs,
+      .video-solution-card,
       .btn,
       .modal-backdrop,
       #screen-welcome,
@@ -1716,6 +1878,52 @@ export function generateInteractiveHtmlMockTest(
         <span>Re-attempt Test</span>
       </button>
     </div>
+
+    ${videoSolutionUrl ? `
+    <!-- Complete Mock Test Video Solution Card -->
+    <a href="${escapeHtml(videoSolutionUrl)}" target="_blank" rel="noopener noreferrer" class="video-solution-card" title="Click to watch complete video solution on YouTube">
+      <div class="video-thumb-container">
+        <img 
+          src="${videoSolutionId ? `https://img.youtube.com/vi/${videoSolutionId}/hqdefault.jpg` : 'https://img.youtube.com/vi/default/hqdefault.jpg'}" 
+          alt="YouTube Video Solution Thumbnail" 
+          class="video-thumb-img"
+          loading="lazy"
+          onerror="this.src='https://img.youtube.com/vi/${videoSolutionId || ''}/mqdefault.jpg'"
+        />
+        <div class="video-play-overlay">
+          <div class="video-play-btn">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="6 3 20 12 6 21 6 3"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="video-solution-content">
+        <div class="video-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+          <span>Complete Video Solution • संपूर्ण वीडियो हल</span>
+        </div>
+        <h3 class="video-solution-title">${escapeHtml(videoSolutionTitle)}</h3>
+        <p class="video-solution-desc">
+          इस मॉक टेस्ट के सभी प्रश्नों का विस्तृत वीडियो हल, शॉर्टकट ट्रिक्स व संपूर्ण व्याख्या YouTube पर देखें।
+        </p>
+        <div>
+          <span class="video-action-cta">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="6 3 20 12 6 21 6 3"/>
+            </svg>
+            <span>Watch Solution on YouTube</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+          </span>
+        </div>
+      </div>
+    </a>
+    ` : ''}
 
     <!-- Question-by-Question Solutions Review -->
     <div class="review-section">
