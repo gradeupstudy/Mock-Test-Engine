@@ -328,6 +328,19 @@ export function generateInteractiveHtmlMockTest(
       background: #cc0000;
       transform: translateY(-1px);
     }
+    .btn-verify {
+      background: #ffffff;
+      border: 1.5px solid #16a34a;
+      color: #15803d;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(22, 163, 74, 0.12);
+    }
+    .btn-verify:hover {
+      background: #f0fdf4;
+      border-color: #15803d;
+      color: #166534;
+      transform: translateY(-1px);
+    }
     .btn:disabled {
       opacity: 0.55;
       cursor: not-allowed;
@@ -1583,29 +1596,37 @@ export function generateInteractiveHtmlMockTest(
       <!-- YouTube Channel Subscribe Gate (if enabled) -->
       ${mergedConfig.enableYoutubeGate ? `
       <div id="yt-gate-box" class="yt-gate-card">
-        <div class="yt-gate-badge">
+        <div id="yt-gate-badge-status" class="yt-gate-badge">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
           </svg>
-          <span>Mandatory Gate</span>
+          <span id="yt-gate-badge-text">Mandatory Gate</span>
         </div>
-        <h3 class="yt-gate-title">Subscribe to Our YouTube Channel to Unlock Mock Test</h3>
-        <p class="yt-gate-desc">
+        <h3 id="yt-gate-title" class="yt-gate-title">Subscribe to Our YouTube Channel to Unlock Mock Test</h3>
+        <p id="yt-gate-desc" class="yt-gate-desc">
           इस फ्री मॉक टेस्ट को अनलॉक करने के लिए कृपया हमारे ऑफिशियल यूट्यूब चैनल <strong>${escapeHtml(mergedConfig.youtubeChannelName)}</strong> को सब्सक्राइब करें।
         </p>
 
-        <div id="yt-actions-container" class="flex justify-center gap-3 flex-wrap">
-          <a href="${escapeHtml(mergedConfig.youtubeChannelUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-yt" onclick="handleYoutubeSubscribeClick()">
+        <div id="yt-actions-container" class="flex justify-center gap-3 flex-wrap items-center">
+          <a id="btn-yt-subscribe" href="${escapeHtml(mergedConfig.youtubeChannelUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-yt" onclick="handleYoutubeSubscribeClick(event)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
             </svg>
             <span>Subscribe on YouTube</span>
           </a>
+
+          <button type="button" id="btn-yt-already-sub" class="btn btn-verify" onclick="verifySubscriptionManually()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Already Subscribed? Unlock (मैने सब्सक्राइब कर लिया है)</span>
+          </button>
         </div>
 
         <div id="yt-unlocked-msg" class="gate-unlocked-banner hidden" style="margin-top: 1rem;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          <span>YouTube Channel Verified! Mock Test Unlocked.</span>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <div style="text-align: left;">
+            <div style="font-weight: 800; font-size: 0.95rem; color: #166534;">YouTube Channel Verified! Mock Test Unlocked.</div>
+            <div style="font-size: 0.8rem; font-weight: 500; color: #15803d;">चैनल सब्सक्राइब सत्यापित हो गया है! आप अब नीचे उम्मीदवार का नाम दर्ज करके मॉक टेस्ट शुरू कर सकते हैं।</div>
+          </div>
         </div>
       </div>
       ` : ''}
@@ -1641,8 +1662,13 @@ export function generateInteractiveHtmlMockTest(
             <span>Start Mock Test Now</span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
           </button>
-          <div id="gate-warning-msg" class="text-xs" style="color: #dc2626; font-weight: 700; margin-top: 0.5rem; display: none;">
-            ⚠️ Please click 'Subscribe on YouTube' to unlock the test before starting.
+          <div id="gate-warning-msg" style="display: none; margin-top: 0.85rem; background: #fff1f2; border: 1.5px solid #fecdd3; border-radius: 0.75rem; padding: 0.75rem 1rem; text-align: center; max-width: 480px; margin-left: auto; margin-right: auto;">
+            <div style="color: #be123c; font-weight: 700; font-size: 0.85rem; margin-bottom: 0.4rem;">
+              ⚠️ कृपया पहले ऊपर यूट्यूब चैनल को सब्सक्राइब करें, या यदि आप पहले से सब्सक्राइब कर चुके हैं तो नीचे क्लिक करके अनलॉक करें:
+            </div>
+            <button type="button" class="btn btn-verify" style="font-size: 0.8rem; padding: 0.35rem 0.9rem;" onclick="verifySubscriptionManually()">
+              ✓ I Have Subscribed (मैने सब्सक्राइब कर लिया है - अनलॉक करें)
+            </button>
           </div>
         </div>
       </div>
@@ -2022,6 +2048,125 @@ export function generateInteractiveHtmlMockTest(
     let isGateVerified = false;
     let reviewFilter = 'ALL';
 
+    // Storage Helper with multi-layer fallback (localStorage, sessionStorage, in-memory)
+    const memStore = {};
+    function safeStorageGet(key) {
+      try {
+        const val = localStorage.getItem(key);
+        if (val !== null) return val;
+      } catch (e) {}
+      try {
+        const val = sessionStorage.getItem(key);
+        if (val !== null) return val;
+      } catch (e) {}
+      return memStore[key] !== undefined ? memStore[key] : null;
+    }
+
+    function safeStorageSet(key, val) {
+      memStore[key] = val;
+      try { localStorage.setItem(key, val); } catch (e) {}
+      try { sessionStorage.setItem(key, val); } catch (e) {}
+    }
+
+    function getGateKeys() {
+      const cleanTest = (config.testName || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanChannel = (config.youtubeChannelName || 'gradeup').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+      return {
+        testKey: 'yt_gate_unlocked_' + cleanTest,
+        clickKey: 'yt_gate_clicked_' + cleanTest,
+        channelKey: 'yt_gate_unlocked_channel_' + cleanChannel,
+        globalKey: 'yt_gate_unlocked_global'
+      };
+    }
+
+    function checkGateVerified() {
+      if (!config.enableYoutubeGate) return true;
+      if (isGateVerified) return true;
+      const keys = getGateKeys();
+      if (safeStorageGet(keys.testKey) === 'true') return true;
+      if (safeStorageGet(keys.clickKey) === 'true') return true;
+      if (safeStorageGet(keys.channelKey) === 'true') return true;
+      if (safeStorageGet(keys.globalKey) === 'true') return true;
+      return false;
+    }
+
+    function applyGateUnlockedUI() {
+      isGateVerified = true;
+      const keys = getGateKeys();
+      safeStorageSet(keys.testKey, 'true');
+      safeStorageSet(keys.clickKey, 'true');
+      safeStorageSet(keys.channelKey, 'true');
+      safeStorageSet(keys.globalKey, 'true');
+
+      // Update gate container styling to soft green success card
+      const gateBox = document.getElementById('yt-gate-box');
+      if (gateBox) {
+        gateBox.style.background = '#f0fdf4';
+        gateBox.style.borderColor = '#86efac';
+      }
+
+      // Update badge
+      const badgeStatus = document.getElementById('yt-gate-badge-status');
+      if (badgeStatus) badgeStatus.style.background = '#16a34a';
+      const badgeText = document.getElementById('yt-gate-badge-text');
+      if (badgeText) badgeText.textContent = 'Unlocked & Verified';
+
+      // Update Title & Description
+      const gateTitle = document.getElementById('yt-gate-title');
+      if (gateTitle) {
+        gateTitle.style.color = '#15803d';
+        gateTitle.textContent = 'YouTube Subscription Verified!';
+      }
+      const gateDesc = document.getElementById('yt-gate-desc');
+      if (gateDesc) gateDesc.style.display = 'none';
+
+      // Hide subscribe buttons container
+      const actionsContainer = document.getElementById('yt-actions-container');
+      if (actionsContainer) actionsContainer.classList.add('hidden');
+
+      // Show unlocked banner
+      const unlockedBanner = document.getElementById('yt-unlocked-msg');
+      if (unlockedBanner) unlockedBanner.classList.remove('hidden');
+
+      // Hide any warning
+      const warning = document.getElementById('gate-warning-msg');
+      if (warning) warning.style.display = 'none';
+    }
+
+    // YouTube Gate Handlers
+    function handleYoutubeSubscribeClick(e) {
+      // 1. Immediately mark verified in safe storage & memory synchronously
+      // This guarantees persistence before browser switches to YouTube app or freezes background tab!
+      isGateVerified = true;
+      const keys = getGateKeys();
+      safeStorageSet(keys.testKey, 'true');
+      safeStorageSet(keys.clickKey, 'true');
+      safeStorageSet(keys.channelKey, 'true');
+      safeStorageSet(keys.globalKey, 'true');
+
+      // 2. Immediately switch UI to unlocked so it's already verified when student returns
+      applyGateUnlockedUI();
+    }
+
+    function verifySubscriptionManually() {
+      applyGateUnlockedUI();
+    }
+
+    // Handle student return from YouTube app or another browser tab
+    function handleStudentReturn() {
+      if (checkGateVerified()) {
+        applyGateUnlockedUI();
+      }
+    }
+
+    window.addEventListener('focus', handleStudentReturn);
+    window.addEventListener('pageshow', handleStudentReturn);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        handleStudentReturn();
+      }
+    });
+
     // Initialize Application
     window.addEventListener('DOMContentLoaded', () => {
       try {
@@ -2032,17 +2177,12 @@ export function generateInteractiveHtmlMockTest(
         timeRemaining = (config.duration || 60) * 60;
 
         // Check if YouTube gate is already verified in this browser
-        const storedGate = localStorage.getItem('yt_gate_unlocked_' + (config.testName || 'default'));
-        if (storedGate === 'true' || !config.enableYoutubeGate) {
-          isGateVerified = true;
-          const unlockedBanner = document.getElementById('yt-unlocked-msg');
-          if (unlockedBanner) unlockedBanner.classList.remove('hidden');
-          const actionsContainer = document.getElementById('yt-actions-container');
-          if (actionsContainer) actionsContainer.classList.add('hidden');
+        if (checkGateVerified() || !config.enableYoutubeGate) {
+          applyGateUnlockedUI();
         }
 
         // Restore candidate name if previously entered
-        const storedName = localStorage.getItem('gradeup_last_candidate_name');
+        const storedName = safeStorageGet('gradeup_last_candidate_name');
         if (storedName) {
           const inputEl = document.getElementById('input-candidate-name');
           if (inputEl) inputEl.value = storedName;
@@ -2053,45 +2193,23 @@ export function generateInteractiveHtmlMockTest(
       }
     });
 
-    // YouTube Gate Handlers
-    function handleYoutubeSubscribeClick() {
-      // Mark as subscribed after click
-      setTimeout(() => {
-        isGateVerified = true;
-        localStorage.setItem('yt_gate_unlocked_' + (config.testName || 'default'), 'true');
-        const unlockedBanner = document.getElementById('yt-unlocked-msg');
-        if (unlockedBanner) unlockedBanner.classList.remove('hidden');
-        const warning = document.getElementById('gate-warning-msg');
-        if (warning) warning.style.display = 'none';
-      }, 1500);
-    }
-
-    function verifySubscriptionManually() {
-      isGateVerified = true;
-      localStorage.setItem('yt_gate_unlocked_' + (config.testName || 'default'), 'true');
-      const unlockedBanner = document.getElementById('yt-unlocked-msg');
-      if (unlockedBanner) unlockedBanner.classList.remove('hidden');
-      const warning = document.getElementById('gate-warning-msg');
-      if (warning) warning.style.display = 'none';
-      alert('Thank you for subscribing to ' + (config.youtubeChannelName || 'Gradeup Study') + '! Mock test is now unlocked.');
-    }
-
     // Start Test
     function startMockTest() {
-      if (config.enableYoutubeGate && !isGateVerified) {
+      if (config.enableYoutubeGate && !isGateVerified && !checkGateVerified()) {
         const warning = document.getElementById('gate-warning-msg');
         if (warning) warning.style.display = 'block';
         alert('Please subscribe to our YouTube channel first to unlock and start the mock test!');
         return;
       }
 
+      isGateVerified = true;
       const nameInput = document.getElementById('input-candidate-name');
       const candidateName = (nameInput ? nameInput.value.trim() : '') || 'Student';
       const rollInput = document.getElementById('input-candidate-roll');
       const candidateRoll = rollInput ? rollInput.value.trim() : '';
 
       candidate = { name: candidateName, roll: candidateRoll };
-      localStorage.setItem('gradeup_last_candidate_name', candidateName);
+      safeStorageSet('gradeup_last_candidate_name', candidateName);
 
       // Setup Navbar
       document.getElementById('nav-candidate-name').textContent = candidate.name;
