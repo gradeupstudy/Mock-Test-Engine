@@ -28,10 +28,14 @@ import {
   Layers,
   BookOpen,
   Loader2,
-  X
+  X,
+  Archive,
+  ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import JSZip from 'jszip';
+import { ungzip } from 'pako';
 
 interface BulkUploadViewProps {
   onImportSuccess: (importedCount: number) => void;
@@ -211,6 +215,44 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
     return { isValid: errors.length === 0, errors };
   };
 
+  // Helper to extract questions array from various parsed JSON structures (Backups, Exports, Question Bank objects)
+  const extractQuestionsFromParsedJson = (parsed: any): any[] | null => {
+    if (!parsed) return null;
+    // Standard Gradeup Study backup structure { version: '...', questions: [...], mockHistory: [...] }
+    if (Array.isArray(parsed.questions)) {
+      return parsed.questions;
+    }
+    // Direct array of questions [ { question: ... }, ... ]
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    // Alternative keys commonly used in exports / backups
+    if (Array.isArray(parsed.data)) {
+      return parsed.data;
+    }
+    if (Array.isArray(parsed.mcqs)) {
+      return parsed.mcqs;
+    }
+    if (Array.isArray(parsed.questionBank)) {
+      return parsed.questionBank;
+    }
+    if (Array.isArray(parsed.items)) {
+      return parsed.items;
+    }
+    // Search for any nested array property containing question-like objects
+    if (typeof parsed === 'object') {
+      for (const key of Object.keys(parsed)) {
+        const val = parsed[key];
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+          if (val[0].question || val[0].q || val[0].qtext || val[0].optionA || val[0].optiona) {
+            return val;
+          }
+        }
+      }
+    }
+    return null;
+  };
+
   const processRawObjects = (
     rawObjects: any[],
     sourceName?: string,
@@ -241,8 +283,8 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
         return '';
       };
 
-      const extractedSub = findVal(['subject', 'category', 'topic', 'sub']);
-      const extractedChap = findVal(['chaptername', 'chapter_name', 'chapter', 'unit', 'subtopic', 'chap']);
+      const extractedSub = obj.subject || findVal(['subject', 'category', 'topic', 'sub']);
+      const extractedChap = obj.chapter || findVal(['chaptername', 'chapter_name', 'chapter', 'unit', 'subtopic', 'chap']);
 
       const subject = (overrideSubject && overrideSubject.trim())
         ? overrideSubject.trim()
@@ -251,23 +293,24 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       const chapter = (overrideChapter && overrideChapter.trim())
         ? overrideChapter.trim()
         : (extractedChap || 'General');
-      const question = findVal(['question', 'stem', 'qtext', 'q_text', 'questiontext', 'q']);
-      const optionA = findVal(['optiona', 'option_a', 'opta', 'opt1', 'option1', 'a']);
-      const optionB = findVal(['optionb', 'option_b', 'optb', 'opt2', 'option2', 'b']);
-      const optionC = findVal(['optionc', 'option_c', 'optc', 'opt3', 'option3', 'c']);
-      const optionD = findVal(['optiond', 'option_d', 'optd', 'opt4', 'option4', 'd']);
-      const explanation = findVal(['explanation', 'exp', 'solution', 'rationale', 'expl']);
 
-      let answer = findVal(['answer', 'ans', 'correct', 'correctans', 'correctanswer', 'answerkey']).toUpperCase().trim();
+      const question = obj.question || findVal(['question', 'stem', 'qtext', 'q_text', 'questiontext', 'q']);
+      const optionA = obj.optionA || obj.option_a || findVal(['optiona', 'option_a', 'opta', 'opt1', 'option1', 'a']);
+      const optionB = obj.optionB || obj.option_b || findVal(['optionb', 'option_b', 'optb', 'opt2', 'option2', 'b']);
+      const optionC = obj.optionC || obj.option_c || findVal(['optionc', 'option_c', 'optc', 'opt3', 'option3', 'c']);
+      const optionD = obj.optionD || obj.option_d || findVal(['optiond', 'option_d', 'optd', 'opt4', 'option4', 'd']);
+      const explanation = obj.explanation || obj.exp || findVal(['explanation', 'exp', 'solution', 'rationale', 'expl']);
+
+      let answer = (obj.answer || findVal(['answer', 'ans', 'correct', 'correctans', 'correctanswer', 'answerkey'])).toUpperCase().trim();
       answer = answer.replace(/^OPTION\s*/i, '').replace(/[\(\)\[\]]/g, '').trim();
       const numToChar: Record<string, string> = { '1': 'A', '2': 'B', '3': 'C', '4': 'D', 'क': 'A', 'ख': 'B', 'ग': 'C', 'घ': 'D' };
       if (numToChar[answer]) answer = numToChar[answer];
       if (answer.length > 1) answer = answer.charAt(0);
 
-      const rawDiff = findVal(['difficulty', 'diff', 'level']);
+      const rawDiff = obj.difficulty || findVal(['difficulty', 'diff', 'level']);
       let difficulty: 'Easy' | 'Moderate' | 'Hard' = 'Moderate';
-      if (rawDiff.toLowerCase().includes('easy')) difficulty = 'Easy';
-      if (rawDiff.toLowerCase().includes('hard')) difficulty = 'Hard';
+      if (String(rawDiff).toLowerCase().includes('easy')) difficulty = 'Easy';
+      if (String(rawDiff).toLowerCase().includes('hard')) difficulty = 'Hard';
 
       const rowData: Partial<ParsedRow> = {
         idTemp: rowIdTemp,
@@ -305,19 +348,116 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
     setParsedRows(prev => (prev.length > 0 ? [...prev, ...processed] : processed));
   };
 
-  // Process File Object
+  // Process File Object (Supports ZIP backups, GZ, JSON, Excel, Word, CSV, TXT)
   const processFile = async (file: File) => {
     if (!file) return;
 
     setIsParsing(true);
     setAiStatusMessage(null);
 
-    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    const fileNameLower = file.name.toLowerCase();
+    const fileExt = fileNameLower.split('.').pop() || '';
 
     try {
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+
+      // Binary magic byte checks
+      const isZipSignature = uint8.length >= 4 && uint8[0] === 0x50 && uint8[1] === 0x4b;
+      const isGzipSignature = uint8.length >= 2 && uint8[0] === 0x1f && uint8[1] === 0x8b;
+
+      // 1. Handle ZIP Archives (.zip backup files containing JSON, GZ, or sheets)
+      if (isZipSignature || fileExt === 'zip') {
+        try {
+          const zip = await JSZip.loadAsync(arrayBuffer);
+          const extractedQuestions: any[] = [];
+          const zipFiles = Object.keys(zip.files);
+
+          for (const key of zipFiles) {
+            const entry = zip.files[key];
+            if (entry.dir) continue;
+            if (key.startsWith('__MACOSX') || key.endsWith('.DS_Store')) continue;
+
+            const lowerKey = key.toLowerCase();
+
+            // JSON file inside ZIP
+            if (lowerKey.endsWith('.json')) {
+              try {
+                const text = await entry.async('text');
+                const parsed = JSON.parse(text);
+                const qs = extractQuestionsFromParsedJson(parsed);
+                if (qs && qs.length > 0) {
+                  extractedQuestions.push(...qs);
+                }
+              } catch (e) {
+                console.warn('Could not parse JSON inside zip entry:', key, e);
+              }
+            } 
+            // GZ compressed file inside ZIP
+            else if (lowerKey.endsWith('.gz') || lowerKey.endsWith('.json.gz')) {
+              try {
+                const gzBytes = await entry.async('uint8array');
+                const decompressed = ungzip(gzBytes);
+                const text = new TextDecoder('utf-8').decode(decompressed);
+                const parsed = JSON.parse(text);
+                const qs = extractQuestionsFromParsedJson(parsed);
+                if (qs && qs.length > 0) {
+                  extractedQuestions.push(...qs);
+                }
+              } catch (e) {
+                console.warn('Could not parse GZ inside zip entry:', key, e);
+              }
+            } 
+            // Spreadsheet inside ZIP
+            else if (lowerKey.endsWith('.xlsx') || lowerKey.endsWith('.xls') || lowerKey.endsWith('.csv')) {
+              try {
+                const ab = await entry.async('arraybuffer');
+                const workbook = XLSX.read(ab, { type: 'array' });
+                if (workbook.SheetNames && workbook.SheetNames.length > 0) {
+                  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                  const jsonRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+                  if (jsonRows && jsonRows.length > 0) {
+                    extractedQuestions.push(...jsonRows);
+                  }
+                }
+              } catch (e) {
+                console.warn('Could not parse spreadsheet inside zip entry:', key, e);
+              }
+            }
+          }
+
+          if (extractedQuestions.length > 0) {
+            processRawObjects(extractedQuestions, file.name);
+            setAiStatusMessage(`Successfully extracted ${extractedQuestions.length} MCQs from backup archive "${file.name}". Ready to append to your Question Bank.`);
+            setTimeout(() => setAiStatusMessage(null), 6000);
+            return;
+          }
+        } catch (zipErr) {
+          console.warn('Standard JSZip load failed, attempting fallback decompression...', zipErr);
+        }
+      }
+
+      // 2. Handle Gzip Compressed Files (.json.gz, .gz, or gzip renamed to .zip)
+      if (isGzipSignature || fileNameLower.endsWith('.gz') || fileNameLower.endsWith('.json.gz')) {
+        try {
+          const decompressed = ungzip(uint8);
+          const text = new TextDecoder('utf-8').decode(decompressed);
+          const parsed = JSON.parse(text);
+          const qs = extractQuestionsFromParsedJson(parsed);
+          if (qs && qs.length > 0) {
+            processRawObjects(qs, file.name);
+            setAiStatusMessage(`Successfully decompressed ${qs.length} MCQs from backup file "${file.name}". Ready to append.`);
+            setTimeout(() => setAiStatusMessage(null), 6000);
+            return;
+          }
+        } catch (gzErr) {
+          console.warn('Gzip decompression failed:', gzErr);
+        }
+      }
+
+      // 3. Handle Excel / CSV Files
       if (fileExt === 'xlsx' || fileExt === 'xls' || fileExt === 'csv') {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
           alert('The uploaded file contains no sheets.');
           return;
@@ -329,36 +469,46 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
           return;
         }
         processRawObjects(jsonRows, file.name);
-      } else if (fileExt === 'docx' || fileExt === 'doc') {
-        const arrayBuffer = await file.arrayBuffer();
+        return;
+      }
+
+      // 4. Handle Word DOCX / DOC Files
+      if (fileExt === 'docx' || fileExt === 'doc') {
         let text = '';
         try {
           const result = await mammoth.extractRawText({ arrayBuffer });
           text = result.value || '';
         } catch (e) {
-          // Mammoth failed (e.g. .doc HTML or binary file)
+          // Mammoth failed
         }
-
         if (!text.trim()) {
           text = await file.text();
         }
-
         if (text.trim()) {
           parseTextBlocks(text, file.name);
         } else {
           alert('Could not extract text from document. Please ensure it is not empty.');
         }
-      } else if (fileExt === 'txt' || fileExt === 'json' || fileExt === 'tsv') {
-        const text = await file.text();
-        parseTextBlocks(text, file.name);
-      } else {
-        try {
-          const text = await file.text();
-          parseTextBlocks(text, file.name);
-        } catch (err) {
-          alert(`Unsupported file format: .${fileExt}`);
-        }
+        return;
       }
+
+      // 5. Handle JSON / Text Files (including uncompressed backup JSON)
+      const text = await file.text();
+      try {
+        const parsed = JSON.parse(text);
+        const qs = extractQuestionsFromParsedJson(parsed);
+        if (qs && qs.length > 0) {
+          processRawObjects(qs, file.name);
+          setAiStatusMessage(`Successfully loaded ${qs.length} MCQs from backup JSON "${file.name}". Ready to append.`);
+          setTimeout(() => setAiStatusMessage(null), 6000);
+          return;
+        }
+      } catch (e) {
+        // Not JSON
+      }
+
+      // 6. Fallback Text Parsing
+      parseTextBlocks(text, file.name);
     } catch (err: any) {
       console.error('File reading error:', err);
       alert(`Error reading file "${file.name}": ${err.message || 'Unknown error'}`);
@@ -434,12 +584,14 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       }
     }
 
-    // Check if it's JSON
-    if (text.trim().startsWith('[') && text.trim().endsWith(']')) {
+    // Check if it's JSON (Array or Backup Object)
+    const trimmedText = text.trim();
+    if ((trimmedText.startsWith('[') && trimmedText.endsWith(']')) || (trimmedText.startsWith('{') && trimmedText.endsWith('}'))) {
       try {
-        const jsonArr = JSON.parse(text);
-        if (Array.isArray(jsonArr)) {
-          processRawObjects(jsonArr, sourceName, targetSub, targetChap);
+        const parsedJson = JSON.parse(trimmedText);
+        const qs = extractQuestionsFromParsedJson(parsedJson);
+        if (qs && Array.isArray(qs) && qs.length > 0) {
+          processRawObjects(qs, sourceName, targetSub, targetChap);
           return;
         }
       } catch (e) {
@@ -1205,7 +1357,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             <span>Bulk Upload MCQs</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Seamlessly import or generate bulk MCQs from Excel, Word DOCX, CSV, Text, or AI Generator.
+            Seamlessly import or generate bulk MCQs from Backup ZIP (.zip, .json.gz), Excel, Word DOCX, CSV, Text, or AI Generator.
           </p>
         </div>
 
@@ -1245,7 +1397,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" />
-          <span>File Upload (Excel / Word / CSV)</span>
+          <span>File Upload (ZIP / Excel / Word / CSV)</span>
         </button>
 
         <button
@@ -1292,7 +1444,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
           onDrop={handleDrop}
           className="border-2 border-dashed border-slate-700 bg-slate-900/60 rounded-2xl p-8 text-center hover:border-blue-500/60 transition-all shadow-sm"
         >
-          <div className="max-w-lg mx-auto space-y-4">
+          <div className="max-w-xl mx-auto space-y-4">
             <div className="w-14 h-14 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
               <UploadCloud className="w-7 h-7" />
             </div>
@@ -1300,7 +1452,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             <div>
               <h3 className="text-sm font-bold text-white">Select or Drag & Drop Question File</h3>
               <p className="text-xs text-slate-400 mt-1">
-                Supports Excel (.xlsx, .xls), Word (.docx, .doc), CSV, and TXT files.
+                Supports Backup ZIP (.zip, .json.gz), Excel (.xlsx, .xls), Word (.docx, .doc), CSV, TXT, and JSON files.
               </p>
             </div>
 
@@ -1309,7 +1461,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
               <span>Browse Computer Files</span>
               <input
                 type="file"
-                accept=".xlsx,.xls,.docx,.doc,.csv,.txt,.tsv,.json"
+                accept=".zip,.gz,.json.gz,.json,.xlsx,.xls,.docx,.doc,.csv,.txt,.tsv"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -1318,15 +1470,25 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             {isParsing && (
               <div className="flex items-center justify-center space-x-2 text-xs text-blue-400 pt-2 animate-pulse">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Parsing file contents and mapping columns...</span>
+                <span>Parsing file contents and extracting MCQs...</span>
               </div>
             )}
 
-            <div className="pt-4 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+            <div className="pt-4 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
+              <div className="p-3 bg-indigo-950/40 rounded-xl border border-indigo-800/50">
+                <div className="flex items-center space-x-2 text-indigo-400 font-semibold text-xs mb-1">
+                  <Archive className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">Backup ZIP / GZ</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-tight">
+                  Exported from Backup section of any project (.zip, .json.gz). Safely appends all MCQs.
+                </p>
+              </div>
+
               <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
                 <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-xs mb-1">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Excel / CSV Headers</span>
+                  <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">Excel / CSV</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-tight">
                   subject, chapter, question, optionA, optionB, optionC, optionD, answer
@@ -1335,8 +1497,8 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
 
               <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
                 <div className="flex items-center space-x-2 text-blue-400 font-semibold text-xs mb-1">
-                  <FileText className="w-4 h-4" />
-                  <span>Word DOCX Format</span>
+                  <FileText className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">Word DOCX</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-tight">
                   Q1. Question text, A. Option A, B. Option B, C. Option C, D. Option D, Ans: A
@@ -1823,6 +1985,31 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       {/* Parsed / Staged MCQs Table & Controls */}
       {parsedRows.length > 0 && (
         <div className="space-y-4">
+          {/* Safe Append Guarantee Callout */}
+          <div className="bg-emerald-950/40 border border-emerald-600/40 rounded-2xl p-3.5 px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+            <div className="flex items-center space-x-3 text-xs">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 text-emerald-400">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-bold text-emerald-300">
+                  Safe Append Guarantee Active
+                </p>
+                <p className="text-slate-300 text-[11px] mt-0.5">
+                  Importing will <strong>safely add</strong> these {validCount} MCQs into your database. Existing MCQs in your Question Bank will <strong>never be replaced or overwritten</strong>.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleImportValid}
+              disabled={validCount === 0}
+              className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-3.5 py-2 rounded-xl text-xs shadow hover:shadow-emerald-500/20 transition-all flex-shrink-0 w-full sm:w-auto justify-center"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Add {validCount} MCQs to Bank (Append Only)</span>
+            </button>
+          </div>
+
           {/* Action Bar & Stats */}
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center space-x-3 text-xs flex-wrap gap-y-1">
