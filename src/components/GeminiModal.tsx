@@ -214,7 +214,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
         return {
           title: 'Google Gemini AI',
           placeholder: 'AIzaSy... (Paste multiple keys separated by lines)',
-          defaultModel: 'gemini-2.5-flash',
+          defaultModel: 'gemini-3.8-flash',
           keyUrl: 'https://aistudio.google.com/app/apikey',
           note: 'Get free Google Gemini API keys from Google AI Studio.'
         };
@@ -222,7 +222,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
         return {
           title: 'Groq Cloud AI (High Speed)',
           placeholder: 'gsk_... (Paste multiple keys separated by lines)',
-          defaultModel: 'llama-3.3-70b-versatile',
+          defaultModel: 'openai/gpt-oss-120b',
           keyUrl: 'https://console.groq.com/keys',
           note: 'Ultra-fast open models with generous free API quota.'
         };
@@ -238,7 +238,7 @@ export const GeminiModal: React.FC<GeminiModalProps> = ({
         return {
           title: 'OpenRouter / Universal Router',
           placeholder: 'sk-or-v1-... (Paste multiple keys separated by lines)',
-          defaultModel: 'google/gemini-2.5-flash',
+          defaultModel: 'google/gemini-2.0-flash-001',
           keyUrl: 'https://openrouter.ai/keys',
           note: 'Access multiple AI models with unified keys.'
         };

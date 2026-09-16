@@ -25,6 +25,44 @@ export function extractKeysList(input?: any): string[] {
   return Array.from(new Set(result));
 }
 
+export function sanitizeModelName(provider?: string, modelName?: string): string {
+  if (!modelName || !modelName.trim()) return '';
+  const m = modelName.trim();
+  const prov = provider || 'gemini';
+  if (prov === 'gemini') {
+    if (
+      m === 'gemini-2.5-flash' ||
+      m === 'gemini-2.0-flash' ||
+      m === 'gemini-1.5-flash' ||
+      m === 'gemini-pro' ||
+      m === 'gemini-3.6-flash' ||
+      m === 'gemini-3.7-flash'
+    ) {
+      return 'gemini-3.8-flash';
+    }
+    if (m === 'gemini-2.5-pro' || m === 'gemini-2.0-pro') {
+      return 'gemini-3.1-pro-preview';
+    }
+  } else if (prov === 'groq') {
+    if (
+      m === 'gemma2-9b-it' ||
+      m === 'gemma-7b-it' ||
+      m === 'llama3-70b-8192' ||
+      m === 'llama3-8b-8192' ||
+      m === 'mixtral-8x7b-32768' ||
+      m === 'llama-3.3-70b-versatile' ||
+      m === 'llama-3.1-8b-instant'
+    ) {
+      return 'openai/gpt-oss-120b';
+    }
+  } else if (prov === 'openrouter') {
+    if (m === 'google/gemini-2.5-flash' || m === 'google/gemini-pro') {
+      return 'google/gemini-2.0-flash-001';
+    }
+  }
+  return m;
+}
+
 export function getStoredAiConfig(): AiConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -43,12 +81,13 @@ export function getStoredAiConfig(): AiConfig {
           apiKeysList: primaryKeys,
           tavilyApiKey: parsed.tavilyApiKey || '',
           deeplApiKey: parsed.deeplApiKey || '',
-          model: parsed.model || (parsed.provider === 'ollama' ? 'qwen3:8b' : ''),
+          model: sanitizeModelName(parsed.provider, parsed.model) || (parsed.provider === 'ollama' ? 'qwen3:8b' : ''),
           baseUrl: parsed.baseUrl || (parsed.provider === 'ollama' ? 'http://localhost:11434' : ''),
           enableFallback: parsed.enableFallback !== undefined ? Boolean(parsed.enableFallback) : true,
           fallbackProviders: Array.isArray(parsed.fallbackProviders)
             ? parsed.fallbackProviders.map((fp: any) => ({
                 ...fp,
+                model: sanitizeModelName(fp.provider, fp.model),
                 apiKeysList: extractKeysList([
                   ...(Array.isArray(fp.apiKeysList) ? fp.apiKeysList : []),
                   fp.apiKey || ''
@@ -320,8 +359,8 @@ async function directClientSingleCall(
       throw new Error('Gemini API Key is missing.');
     }
 
-    const rawModel = modelName || 'gemini-2.5-flash';
-    const model = rawModel && rawModel.trim() ? rawModel.trim() : 'gemini-2.5-flash';
+    const rawModel = modelName || 'gemini-3.8-flash';
+    const model = sanitizeModelName('gemini', rawModel) || 'gemini-3.8-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
 
     let res: Response;
@@ -432,10 +471,10 @@ async function directClientSingleCall(
 
     if (provider === 'groq') {
       endpoint = 'https://api.groq.com/openai/v1/chat/completions';
-      defaultModel = 'llama-3.3-70b-versatile';
+      defaultModel = 'openai/gpt-oss-120b';
     } else if (provider === 'openrouter') {
       endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-      defaultModel = 'google/gemini-2.5-flash';
+      defaultModel = 'google/gemini-2.0-flash-001';
     }
 
     if (baseUrl) {
@@ -446,7 +485,18 @@ async function directClientSingleCall(
       throw new Error(`${provider.toUpperCase()} API Key is missing.`);
     }
 
-    const model = modelName || defaultModel;
+    let model = modelName || defaultModel;
+    if (provider === 'groq' || cleanKey.startsWith('gsk_')) {
+      if (
+        model === 'llama3-70b-8192' ||
+        model === 'llama3-8b-8192' ||
+        model === 'mixtral-8x7b-32768' ||
+        model === 'gemma2-9b-it' ||
+        model === 'gemma-7b-it'
+      ) {
+        model = 'openai/gpt-oss-120b';
+      }
+    }
 
     let res: Response;
     try {
@@ -539,21 +589,52 @@ export async function directClientAiCall(
     if (keys.length === 0) return;
     const pointer = clientKeyPointerMap[p] || 0;
 
-    let modelsToTry = [m || (p === 'gemini' ? 'gemini-2.5-flash' : '')];
+    let modelsToTry = [m || (p === 'gemini' ? 'gemini-3.8-flash' : '')];
     if (p === 'gemini') {
-      const primaryM = m && m.trim() ? m.trim() : 'gemini-2.5-flash';
+      let primaryM = m && m.trim() ? m.trim() : 'gemini-3.8-flash';
+      if (
+        primaryM === 'gemini-2.5-flash' ||
+        primaryM === 'gemini-2.0-flash' ||
+        primaryM === 'gemini-1.5-flash' ||
+        primaryM === 'gemini-pro'
+      ) {
+        primaryM = 'gemini-3.8-flash';
+      } else if (primaryM === 'gemini-2.5-pro' || primaryM === 'gemini-2.0-pro') {
+        primaryM = 'gemini-3.1-pro-preview';
+      }
       modelsToTry = [primaryM];
-      if (primaryM !== 'gemini-2.5-flash') modelsToTry.push('gemini-2.5-flash');
-      if (primaryM !== 'gemini-3.7-flash') modelsToTry.push('gemini-3.7-flash');
-      if (primaryM !== 'gemini-2.5-pro') modelsToTry.push('gemini-2.5-pro');
-      if (primaryM !== 'gemini-2.0-flash') modelsToTry.push('gemini-2.0-flash');
-      if (primaryM !== 'gemini-1.5-flash') modelsToTry.push('gemini-1.5-flash');
+      const modernGeminiModels = [
+        'gemini-3.8-flash',
+        'gemini-3.1-flash-lite',
+        'gemini-flash-latest',
+        'gemini-3.1-pro-preview'
+      ];
+      for (const gm of modernGeminiModels) {
+        if (!modelsToTry.includes(gm)) modelsToTry.push(gm);
+      }
     } else if (p === 'groq') {
-      const primaryM = m && m.trim() ? m.trim() : 'llama-3.3-70b-versatile';
+      let primaryM = m && m.trim() ? m.trim() : 'openai/gpt-oss-120b';
+      if (
+        primaryM === 'gemma2-9b-it' ||
+        primaryM === 'gemma-7b-it' ||
+        primaryM === 'llama3-70b-8192' ||
+        primaryM === 'llama3-8b-8192' ||
+        primaryM === 'mixtral-8x7b-32768'
+      ) {
+        primaryM = 'openai/gpt-oss-120b';
+      }
       modelsToTry = [primaryM];
-      if (primaryM !== 'llama-3.3-70b-versatile') modelsToTry.push('llama-3.3-70b-versatile');
-      if (primaryM !== 'llama-3.1-8b-instant') modelsToTry.push('llama-3.1-8b-instant');
-      if (primaryM !== 'gemma2-9b-it') modelsToTry.push('gemma2-9b-it');
+      const groqModels = [
+        'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'qwen/qwen3.6-27b',
+        'llama-3.3-70b-versatile',
+        'llama-3.1-8b-instant'
+      ];
+      for (const gm of groqModels) {
+        if (!modelsToTry.includes(gm)) modelsToTry.push(gm);
+      }
     }
 
     for (const modelToUse of modelsToTry) {

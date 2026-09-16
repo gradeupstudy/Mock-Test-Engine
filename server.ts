@@ -109,17 +109,28 @@ async function callOpenAICompatible(
 
   if (provider === "groq" || cleanKey.startsWith("gsk_")) {
     endpoint = "https://api.groq.com/openai/v1/chat/completions";
-    defaultModel = "llama-3.3-70b-versatile";
+    defaultModel = "openai/gpt-oss-120b";
   } else if (provider === "openrouter" || cleanKey.startsWith("sk-or-")) {
     endpoint = "https://openrouter.ai/api/v1/chat/completions";
-    defaultModel = "google/gemini-2.5-flash";
+    defaultModel = "google/gemini-2.0-flash-001";
   }
 
   if (!cleanKey) {
     throw new Error(`${provider.toUpperCase()} API Key is missing. Please enter your API key in Gradeup AI settings.`);
   }
 
-  const model = modelName || defaultModel;
+  let model = modelName || defaultModel;
+  if (provider === "groq" || cleanKey.startsWith("gsk_")) {
+    if (
+      model === "llama3-70b-8192" ||
+      model === "llama3-8b-8192" ||
+      model === "mixtral-8x7b-32768" ||
+      model === "gemma2-9b-it" ||
+      model === "gemma-7b-it"
+    ) {
+      model = "openai/gpt-oss-120b";
+    }
+  }
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -349,19 +360,47 @@ async function executeSingleTargetServer(
     if (!ai) {
       throw new Error("Google Gemini API Key is missing and process.env.GEMINI_API_KEY is not configured.");
     }
-    const targetModel = modelName && modelName.trim() ? modelName.trim() : "gemini-2.5-flash";
-    const response = await ai.models.generateContent({
-      model: targetModel,
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-      },
-    });
-    if (!response.text) {
-      throw new Error("Gemini API returned an empty text response.");
+    let targetModel = modelName && modelName.trim() ? modelName.trim() : "gemini-3.8-flash";
+    if (
+      targetModel === "gemini-2.5-flash" ||
+      targetModel === "gemini-2.0-flash" ||
+      targetModel === "gemini-1.5-flash" ||
+      targetModel === "gemini-pro" ||
+      targetModel === "gemini-3.6-flash" ||
+      targetModel === "gemini-3.7-flash"
+    ) {
+      targetModel = "gemini-3.8-flash";
+    } else if (targetModel === "gemini-2.5-pro" || targetModel === "gemini-2.0-pro") {
+      targetModel = "gemini-3.1-pro-preview";
     }
-    return response.text.trim();
+
+    let lastGeminiErr: any = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: targetModel,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+          },
+        });
+        if (!response.text) {
+          throw new Error("Gemini API returned an empty text response.");
+        }
+        return response.text.trim();
+      } catch (err: any) {
+        lastGeminiErr = err;
+        const msg = String(err?.message || err).toLowerCase();
+        if (attempt === 0 && (msg.includes('503') || msg.includes('high demand') || msg.includes('unavailable') || msg.includes('429'))) {
+          console.warn(`[Gemini API] Transient high demand / 503 on ${targetModel}, retrying after brief pause...`);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastGeminiErr;
   } else {
     if (!cleanKey) {
       throw new Error(`API Key for ${detectedProvider.toUpperCase()} is required.`);
@@ -418,6 +457,10 @@ function isServerRateLimitError(errText: string): boolean {
     lower.includes('free_tier') ||
     lower.includes('decommissioned') ||
     lower.includes('does not exist') ||
+    lower.includes('do not have access') ||
+    lower.includes('spikes in demand') ||
+    lower.includes('no longer available') ||
+    lower.includes('unsupported') ||
     lower.includes('not found')
   );
 }
@@ -485,21 +528,52 @@ async function executeAiCallServer(
 
     if (keys.length === 0) return;
 
-    let modelsToTry = [m || (p === "gemini" ? "gemini-2.5-flash" : "")];
+    let modelsToTry = [m || (p === "gemini" ? "gemini-3.8-flash" : "")];
     if (p === "gemini") {
-      const primaryM = m && m.trim() ? m.trim() : "gemini-2.5-flash";
+      let primaryM = m && m.trim() ? m.trim() : "gemini-3.8-flash";
+      if (
+        primaryM === "gemini-2.5-flash" ||
+        primaryM === "gemini-2.0-flash" ||
+        primaryM === "gemini-1.5-flash" ||
+        primaryM === "gemini-pro"
+      ) {
+        primaryM = "gemini-3.8-flash";
+      } else if (primaryM === "gemini-2.5-pro" || primaryM === "gemini-2.0-pro") {
+        primaryM = "gemini-3.1-pro-preview";
+      }
       modelsToTry = [primaryM];
-      if (primaryM !== "gemini-2.5-flash") modelsToTry.push("gemini-2.5-flash");
-      if (primaryM !== "gemini-3.7-flash") modelsToTry.push("gemini-3.7-flash");
-      if (primaryM !== "gemini-2.5-pro") modelsToTry.push("gemini-2.5-pro");
-      if (primaryM !== "gemini-2.0-flash") modelsToTry.push("gemini-2.0-flash");
-      if (primaryM !== "gemini-1.5-flash") modelsToTry.push("gemini-1.5-flash");
+      const modernGeminiModels = [
+        "gemini-3.8-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.1-pro-preview"
+      ];
+      for (const gm of modernGeminiModels) {
+        if (!modelsToTry.includes(gm)) modelsToTry.push(gm);
+      }
     } else if (p === "groq") {
-      const primaryM = m && m.trim() ? m.trim() : "llama-3.3-70b-versatile";
+      let primaryM = m && m.trim() ? m.trim() : "openai/gpt-oss-120b";
+      if (
+        primaryM === "gemma2-9b-it" ||
+        primaryM === "gemma-7b-it" ||
+        primaryM === "llama3-70b-8192" ||
+        primaryM === "llama3-8b-8192" ||
+        primaryM === "mixtral-8x7b-32768"
+      ) {
+        primaryM = "openai/gpt-oss-120b";
+      }
       modelsToTry = [primaryM];
-      if (primaryM !== "llama-3.3-70b-versatile") modelsToTry.push("llama-3.3-70b-versatile");
-      if (primaryM !== "llama-3.1-8b-instant") modelsToTry.push("llama-3.1-8b-instant");
-      if (primaryM !== "gemma2-9b-it") modelsToTry.push("gemma2-9b-it");
+      const groqModels = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3.6-27b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant"
+      ];
+      for (const gm of groqModels) {
+        if (!modelsToTry.includes(gm)) modelsToTry.push(gm);
+      }
     }
 
     if (serverKeyPointerMap[p] === undefined) {
@@ -539,7 +613,12 @@ async function executeAiCallServer(
   if (process.env.GEMINI_API_KEY) {
     const hasEnv = targets.some(t => t.provider === "gemini" && (t.apiKey === "" || t.apiKey === process.env.GEMINI_API_KEY));
     if (!hasEnv) {
-      const serverGeminiModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+      const serverGeminiModels = [
+        "gemini-3.8-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.1-pro-preview"
+      ];
       for (const mName of serverGeminiModels) {
         targets.push({
           provider: "gemini",

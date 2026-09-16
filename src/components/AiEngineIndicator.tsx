@@ -18,12 +18,12 @@ export function getAiEngineDetails(config: AiConfig, activeKeyIndex?: number) {
 
   let providerName = 'Google Gemini';
   let providerShort = 'Gemini';
-  let defaultModel = 'gemini-2.5-flash';
+  let defaultModel = 'gemini-3.8-flash';
 
   if (provider === 'groq') {
     providerName = 'Groq Cloud AI';
     providerShort = 'Groq';
-    defaultModel = 'llama-3.3-70b-versatile';
+    defaultModel = 'openai/gpt-oss-120b';
   } else if (provider === 'openai') {
     providerName = 'OpenAI';
     providerShort = 'OpenAI';
@@ -31,7 +31,7 @@ export function getAiEngineDetails(config: AiConfig, activeKeyIndex?: number) {
   } else if (provider === 'openrouter') {
     providerName = 'OpenRouter';
     providerShort = 'OpenRouter';
-    defaultModel = 'google/gemini-2.5-flash';
+    defaultModel = 'google/gemini-2.0-flash-001';
   } else if (provider === 'ollama') {
     providerName = 'Ollama Local';
     providerShort = 'Ollama';
