@@ -242,13 +242,108 @@ ${JSON.stringify(payload, null, 2)}`;
 }
 
 // ==========================================
-function getQuestionUniqueKey(q: Question): string {
+export function getQuestionUniqueKey(q: Question): string {
   if (q.id && q.id > 0) {
     return `id_${q.id}`;
   }
   const qText = (q.question || '').trim().toLowerCase().slice(0, 120);
   const qOptA = (q.optionA || '').trim().toLowerCase().slice(0, 40);
   return `txt_${qText}_${qOptA}`;
+}
+
+export interface ExcludedQuestionContext {
+  excludedIds: Set<number>;
+  excludedKeys: Set<string>;
+  excludedTexts: Set<string>;
+  excludedMockIds: Set<number>;
+  recentMockQuestionVectors: Set<string>[];
+  questionsInLast50: Set<number>;
+}
+
+export function buildExcludedContext(
+  mockHistory: MockHistory[],
+  excludeLastN: number,
+  allQuestions: Question[]
+): ExcludedQuestionContext {
+  const excludedIds = new Set<number>();
+  const excludedKeys = new Set<string>();
+  const excludedTexts = new Set<string>();
+  const excludedMockIds = new Set<number>();
+  const questionsInLast50 = new Set<number>();
+  const recentMockQuestionVectors: Set<string>[] = [];
+
+  // Sort mockHistory descending (newest first)
+  const sortedMocks = [...(mockHistory || [])].sort((a, b) => {
+    const tA = (typeof a.mockId === 'number' && a.mockId > 0) ? a.mockId : (a.createdDate ? new Date(a.createdDate).getTime() : (a.id || 0));
+    const tB = (typeof b.mockId === 'number' && b.mockId > 0) ? b.mockId : (b.createdDate ? new Date(b.createdDate).getTime() : (b.id || 0));
+    return tB - tA;
+  });
+
+  const targetExcludedMocks = sortedMocks.slice(0, Math.max(0, excludeLastN));
+  targetExcludedMocks.forEach(m => {
+    if (typeof m.mockId === 'number') excludedMockIds.add(m.mockId);
+    if (typeof m.id === 'number') excludedMockIds.add(m.id);
+
+    if (Array.isArray(m.questionIds)) {
+      m.questionIds.forEach(id => {
+        if (typeof id === 'number' && id > 0) excludedIds.add(id);
+      });
+    }
+
+    if (Array.isArray(m.questions)) {
+      m.questions.forEach(q => {
+        if (typeof q.id === 'number' && q.id > 0) excludedIds.add(q.id);
+        const key = getQuestionUniqueKey(q);
+        if (key) excludedKeys.add(key);
+        const norm = (q.question || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (norm) excludedTexts.add(norm);
+      });
+    }
+  });
+
+  // Also collect up to 50 recent mocks for general usage history
+  sortedMocks.slice(0, 50).forEach(m => {
+    if (Array.isArray(m.questionIds)) {
+      m.questionIds.forEach(id => {
+        if (typeof id === 'number' && id > 0) questionsInLast50.add(id);
+      });
+    }
+    if (Array.isArray(m.questions)) {
+      m.questions.forEach(q => {
+        if (typeof q.id === 'number' && q.id > 0) questionsInLast50.add(q.id);
+      });
+    }
+  });
+
+  // Vectors for recent mock questions for vector deduplication
+  const recentQuestions = allQuestions.filter(q =>
+    (typeof q.id === 'number' && questionsInLast50.has(q.id)) ||
+    (typeof q.id === 'number' && excludedIds.has(q.id)) ||
+    excludedKeys.has(getQuestionUniqueKey(q))
+  );
+
+  recentQuestions.forEach(q => {
+    recentMockQuestionVectors.push(extractNgramVector(q.question));
+  });
+
+  return {
+    excludedIds,
+    excludedKeys,
+    excludedTexts,
+    excludedMockIds,
+    recentMockQuestionVectors,
+    questionsInLast50
+  };
+}
+
+export function isQuestionExcluded(q: Question, ctx: ExcludedQuestionContext): boolean {
+  if (typeof q.id === 'number' && q.id > 0 && ctx.excludedIds.has(q.id)) return true;
+  const key = getQuestionUniqueKey(q);
+  if (ctx.excludedKeys.has(key)) return true;
+  const norm = (q.question || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (norm && ctx.excludedTexts.has(norm)) return true;
+  if (typeof q.lastUsedMockId === 'number' && ctx.excludedMockIds.has(q.lastUsedMockId)) return true;
+  return false;
 }
 
 // MAIN UNIFIED X-IQSE ENGINE RUNNER
@@ -291,23 +386,8 @@ export async function runIQSE(
     }
   });
 
-  // Extract recent mock question IDs
-  const recentMockIds = new Set(
-    mockHistory.slice(0, excludeLastN).map(m => m.mockId)
-  );
-
-  const questionsInLast50 = new Set<number>();
-  const recentMockQuestionVectors: Set<string>[] = [];
-
-  mockHistory.slice(0, 50).forEach(m => {
-    m.questionIds.forEach(qId => questionsInLast50.add(qId));
-  });
-
-  // Pre-calculate vectors for recent mock questions for Vector Deduplication
-  const recentMockQuestions = uniqueInputQuestions.filter(q => q.id && questionsInLast50.has(q.id));
-  recentMockQuestions.forEach(q => {
-    recentMockQuestionVectors.push(extractNgramVector(q.question));
-  });
+  // Build comprehensive exclusion context from mock history
+  const ctx = buildExcludedContext(mockHistory, excludeLastN, uniqueInputQuestions);
 
   // Yield execution to UI thread
   await new Promise(r => setTimeout(r, 40));
@@ -362,19 +442,19 @@ export async function runIQSE(
             return qChap === targetChap;
           });
 
-          const scored = scoreAndSortQuestionsTrio(
+          const picked = pickQuestionsFromPool(
             chapterPool,
-            recentMockIds,
+            targetCount,
+            ctx,
+            excludeLastN,
+            uniqueThreshold,
             usedSimilarityGroups,
             selectedVectorsThisSession,
-            recentMockQuestionVectors,
             questionVectorMap,
             irtThetas,
-            semanticThreshold,
-            true
+            semanticThreshold
           );
 
-          const picked = scored.slice(0, targetCount);
           picked.forEach(q => {
             const key = getQuestionUniqueKey(q);
             if (!selectedKeysThisSession.has(key)) {
@@ -394,19 +474,20 @@ export async function runIQSE(
       if (sectionPickedCount < section.questionCount) {
         const remainingNeeded = section.questionCount - sectionPickedCount;
         const availablePool = subjectPool.filter(q => !selectedKeysThisSession.has(getQuestionUniqueKey(q)));
-        const scored = scoreAndSortQuestionsTrio(
+
+        const picked = pickQuestionsFromPool(
           availablePool,
-          recentMockIds,
+          remainingNeeded,
+          ctx,
+          excludeLastN,
+          uniqueThreshold,
           usedSimilarityGroups,
           selectedVectorsThisSession,
-          recentMockQuestionVectors,
           questionVectorMap,
           irtThetas,
-          semanticThreshold,
-          true
+          semanticThreshold
         );
 
-        const picked = scored.slice(0, remainingNeeded);
         picked.forEach(q => {
           const key = getQuestionUniqueKey(q);
           if (!selectedKeysThisSession.has(key)) {
@@ -422,16 +503,17 @@ export async function runIQSE(
       }
     }
 
-    // 1. Calculate Standard Usage Uniqueness Score
-    let freshOrUniqueCount = 0;
-    selectedThisAttempt.forEach(q => {
-      if (!questionsInLast50.has(q.id!)) {
-        freshOrUniqueCount++;
-      }
-    });
+    // 1. Calculate Standard Usage Uniqueness Score:
+    // Check how many questions are completely non-repeated from the excluded mocks
+    const nonExcludedCount = selectedThisAttempt.filter(q => !isQuestionExcluded(q, ctx)).length;
+    const freshZeroUsageCount = selectedThisAttempt.filter(q => !isQuestionExcluded(q, ctx) && (q.usageCount || 0) === 0).length;
 
     const uniqueness = selectedThisAttempt.length > 0
-      ? Math.round((freshOrUniqueCount / selectedThisAttempt.length) * 100)
+      ? (excludeLastN > 0
+          ? Math.round((nonExcludedCount / selectedThisAttempt.length) * 100)
+          : (uniqueThreshold === 100
+              ? Math.round((freshZeroUsageCount / selectedThisAttempt.length) * 100)
+              : Math.round((nonExcludedCount / selectedThisAttempt.length) * 100)))
       : 100;
 
     // 2. Calculate Semantic Vector Uniqueness Score
@@ -492,7 +574,7 @@ export async function runIQSE(
   const updatedQuestionsToSave: Question[] = [];
 
   finalQuestions = finalQuestions.map(q => {
-    const newCount = q.usageCount + 1;
+    const newCount = (q.usageCount || 0) + 1;
     const newStatus = computeQuestionStatus(newCount);
     const updated: Question = {
       ...q,
@@ -538,24 +620,94 @@ export async function runIQSE(
   };
 }
 
-function scoreAndSortQuestionsTrio(
+// 2-Tier Candidate Pool Partitioning:
+// Guarantees zero repetition from excluded mocks unless question bank is genuinely exhausted
+function pickQuestionsFromPool(
   pool: Question[],
-  recentMockIds: Set<number>,
+  neededCount: number,
+  ctx: ExcludedQuestionContext,
+  excludeLastN: number,
+  _uniqueThreshold: number,
   usedSimilarityGroups: Set<number>,
   selectedVectorsThisSession: Set<string>[],
-  recentMockQuestionVectors: Set<string>[],
+  questionVectorMap: Map<number, Set<string>>,
+  irtThetas: number[],
+  semanticThreshold: number
+): Question[] {
+  if (neededCount <= 0 || !pool || pool.length === 0) return [];
+
+  // Partition pool into fresh (non-excluded) and excluded questions
+  const freshQuestions: Question[] = [];
+  const excludedQuestions: Question[] = [];
+
+  for (const q of pool) {
+    if (excludeLastN > 0 && isQuestionExcluded(q, ctx)) {
+      excludedQuestions.push(q);
+    } else {
+      freshQuestions.push(q);
+    }
+  }
+
+  const picked: Question[] = [];
+
+  // Priority 1: Pick from freshQuestions (100% strictly non-repeated)
+  if (freshQuestions.length > 0) {
+    const scoredFresh = scoreAndSortQuestionsTrio(
+      freshQuestions,
+      ctx,
+      usedSimilarityGroups,
+      selectedVectorsThisSession,
+      questionVectorMap,
+      irtThetas,
+      semanticThreshold,
+      true,
+      false
+    );
+    const takeCount = Math.min(neededCount, scoredFresh.length);
+    picked.push(...scoredFresh.slice(0, takeCount));
+  }
+
+  // Priority 2: ONLY IF freshQuestions had fewer questions than requested
+  // (Question Bank shortage), draw the remaining deficit from excluded questions
+  const remainingNeeded = neededCount - picked.length;
+  if (remainingNeeded > 0 && excludedQuestions.length > 0) {
+    const scoredExcluded = scoreAndSortQuestionsTrio(
+      excludedQuestions,
+      ctx,
+      usedSimilarityGroups,
+      selectedVectorsThisSession,
+      questionVectorMap,
+      irtThetas,
+      semanticThreshold,
+      true,
+      true // isExcludedPool = true: strongly prefer lowest usageCount and oldest lastUsedDate
+    );
+    picked.push(...scoredExcluded.slice(0, remainingNeeded));
+  }
+
+  return picked;
+}
+
+function scoreAndSortQuestionsTrio(
+  pool: Question[],
+  ctx: ExcludedQuestionContext,
+  usedSimilarityGroups: Set<number>,
+  selectedVectorsThisSession: Set<string>[],
   questionVectorMap: Map<number, Set<string>>,
   irtThetas: number[],
   semanticThreshold: number,
-  _addNoise: boolean
+  applyJitter: boolean = true,
+  isExcludedPool: boolean = false
 ): Question[] {
   if (!pool || pool.length === 0) return [];
 
   // Fisher-Yates Shuffle pool first so equal-scored items are randomly distributed across the Question Bank
   const poolCopy = [...pool];
-  for (let i = poolCopy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [poolCopy[i], poolCopy[j]] = [poolCopy[j], poolCopy[i]];
+  if (applyJitter) {
+    for (let i = poolCopy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [poolCopy[i], poolCopy[j]] = [poolCopy[j], poolCopy[i]];
+    }
   }
 
   const scored = poolCopy.map(q => {
@@ -564,7 +716,7 @@ function scoreAndSortQuestionsTrio(
     // 1. Basic Usage status bonus/penalty
     switch (q.questionStatus) {
       case 'Fresh':
-        score += 60;
+        score += 80;
         break;
       case 'Used':
         score += 30;
@@ -573,25 +725,30 @@ function scoreAndSortQuestionsTrio(
         score += 0;
         break;
       case 'Overused':
-        score -= 50;
+        score -= 60;
         break;
       case 'Retired':
-        score -= 100;
+        score -= 120;
         break;
     }
 
-    // Exclude last N mocks penalty
-    if (q.lastUsedMockId && recentMockIds.has(q.lastUsedMockId)) {
+    // Heavy penalty if question was in excluded mocks (extra safeguard)
+    if (isQuestionExcluded(q, ctx)) {
+      score -= 50000;
+    }
+
+    // Long-term history penalty (used in last 50 mocks)
+    if (typeof q.id === 'number' && ctx.questionsInLast50.has(q.id)) {
+      score -= 40;
+    }
+
+    // Similarity group avoidance within same mock test
+    if (typeof q.similarityGroupId === 'number' && usedSimilarityGroups.has(q.similarityGroupId)) {
       score -= 200;
     }
 
-    // Similarity group avoidance
-    if (q.similarityGroupId && usedSimilarityGroups.has(q.similarityGroupId)) {
-      score -= 100;
-    }
-
     // 2. SEMANTIC VECTOR DEDUPLICATION ENGINE SCORE
-    const qVec = (q.id ? questionVectorMap.get(q.id) : null) || extractNgramVector(q.question);
+    const qVec = (typeof q.id === 'number' ? questionVectorMap.get(q.id) : null) || extractNgramVector(q.question);
 
     let maxSessionSim = 0;
     selectedVectorsThisSession.forEach(sVec => {
@@ -600,19 +757,19 @@ function scoreAndSortQuestionsTrio(
     });
 
     let maxRecentSim = 0;
-    recentMockQuestionVectors.forEach(rVec => {
+    ctx.recentMockQuestionVectors.forEach(rVec => {
       const sim = calculateJaccardSimilarity(qVec, rVec);
       if (sim > maxRecentSim) maxRecentSim = sim;
     });
 
     if (maxSessionSim >= semanticThreshold) {
-      score -= 300; // Heavily penalize duplicate in current test
+      score -= 500; // Heavily penalize duplicate in current test
     } else {
-      score -= maxSessionSim * 120;
+      score -= maxSessionSim * 150;
     }
 
     if (maxRecentSim >= semanticThreshold) {
-      score -= 150; // Penalize duplicate from recent tests
+      score -= 250; // Penalize duplicate from recent tests
     }
 
     // 3. IRT ENGINE PSYCHOMETRIC INFORMATION BOOST
@@ -625,15 +782,22 @@ function scoreAndSortQuestionsTrio(
     // Days since last used boost
     if (q.lastUsedDate) {
       const days = Math.floor((Date.now() - new Date(q.lastUsedDate).getTime()) / (1000 * 60 * 60 * 24));
-      score += Math.min(days, 30);
+      score += Math.min(days, 60);
     } else {
-      score += 20; // Never used bonus
+      score += 40; // Never used bonus
     }
 
     score += (q.chapterCoverageScore || 5) * 2;
 
-    // Always add random jitter noise so questions with identical scores are randomly picked
-    score += (Math.random() - 0.5) * 60;
+    // If drawn from fallback excluded pool, strictly prefer lowest usage count and oldest date
+    if (isExcludedPool) {
+      score -= (q.usageCount || 1) * 50;
+    }
+
+    // Gentle jitter
+    if (applyJitter) {
+      score += (Math.random() - 0.5) * 40;
+    }
 
     return { question: q, score };
   });

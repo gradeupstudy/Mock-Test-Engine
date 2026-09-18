@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Question, MockHistory, SectionConfig, ExamPreset } from '../types';
-import { runIQSE, IQSEResult, IrtTargetProfile } from '../lib/iqse';
+import { runIQSE, IQSEResult, IrtTargetProfile, getQuestionUniqueKey } from '../lib/iqse';
 import { getStoredAiConfig } from '../lib/aiClient';
-import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset } from '../lib/db';
+import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset, getAllMocks, getAllQuestions } from '../lib/db';
 import { syncMockHistoryToSupabase } from '../lib/supabaseClient';
 import { GenerationProgressModal } from './GenerationProgressModal';
 import { HtmlMockTestModal } from './HtmlMockTestModal';
@@ -79,6 +79,35 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
   const availableSubjects = useMemo(() => {
     return Array.from(new Set(questions.map(q => q.subject))).filter((s): s is string => Boolean(s)).sort();
   }, [questions]);
+
+  // Memoize excluded questions from the selected excludeLastN mocks
+  const { excludedRecentIds, excludedRecentKeys } = useMemo(() => {
+    const ids = new Set<number>();
+    const keys = new Set<string>();
+    if (!mockHistory || excludeLastN <= 0) return { excludedRecentIds: ids, excludedRecentKeys: keys };
+
+    const sorted = [...mockHistory].sort((a, b) => {
+      const tA = (typeof a.mockId === 'number' && a.mockId > 0) ? a.mockId : (a.createdDate ? new Date(a.createdDate).getTime() : (a.id || 0));
+      const tB = (typeof b.mockId === 'number' && b.mockId > 0) ? b.mockId : (b.createdDate ? new Date(b.createdDate).getTime() : (b.id || 0));
+      return tB - tA;
+    });
+
+    sorted.slice(0, excludeLastN).forEach(m => {
+      if (Array.isArray(m.questionIds)) {
+        m.questionIds.forEach(id => {
+          if (typeof id === 'number' && id > 0) ids.add(id);
+        });
+      }
+      if (Array.isArray(m.questions)) {
+        m.questions.forEach(q => {
+          if (typeof q.id === 'number' && q.id > 0) ids.add(q.id);
+          const k = getQuestionUniqueKey(q);
+          if (k) keys.add(k);
+        });
+      }
+    });
+    return { excludedRecentIds: ids, excludedRecentKeys: keys };
+  }, [mockHistory, excludeLastN]);
 
   // Sections State
   const [sections, setSections] = useState<SectionConfig[]>([
@@ -356,7 +385,15 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
     const startTime = Date.now();
 
     try {
-      const result = await runIQSE(questions, sections, mockHistory, {
+      // 1. Fetch freshest mock history and question bank from IndexedDB so consecutive generation has 100% up-to-date history
+      const [dbMocks, dbQuestions] = await Promise.all([
+        getAllMocks().catch(() => []),
+        getAllQuestions().catch(() => [])
+      ]);
+      const effectiveMocks = dbMocks && dbMocks.length > 0 ? dbMocks : mockHistory;
+      const effectiveQuestions = dbQuestions && dbQuestions.length > 0 ? dbQuestions : questions;
+
+      const result = await runIQSE(effectiveQuestions, sections, effectiveMocks, {
         excludeLastN,
         uniqueThreshold,
         mockId,
@@ -380,7 +417,7 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
         testName,
         marks: totalMarks,
         duration,
-        questionIds: result.selectedQuestions.map(q => q.id!).filter(Boolean),
+        questionIds: result.selectedQuestions.map(q => q.id!).filter(id => typeof id === 'number' && id > 0),
         questions: result.selectedQuestions,
         uniqueness: result.uniquenessScore,
         createdDate: new Date().toISOString()
@@ -719,9 +756,17 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
 
         <div className="space-y-3">
           {sections.map((sec, index) => {
-            const availCount = questions.filter(
-              q => q.subject.toLowerCase() === sec.subject.toLowerCase()
-            ).length;
+            const availQuestions = questions.filter(
+              q => (q.subject || '').trim().toLowerCase() === (sec.subject || '').trim().toLowerCase()
+            );
+            const availCount = availQuestions.length;
+
+            const freshCount = availQuestions.filter(q => {
+              if (excludeLastN <= 0) return true;
+              if (typeof q.id === 'number' && q.id > 0 && excludedRecentIds.has(q.id)) return false;
+              if (excludedRecentKeys.has(getQuestionUniqueKey(q))) return false;
+              return true;
+            }).length;
 
             const chapterQuotaCount = sec.chapterDistribution
               ? Object.values(sec.chapterDistribution).reduce<number>((acc, val) => acc + (Number(val) || 0), 0)
@@ -732,13 +777,13 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
                 key={sec.id}
                 className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4"
               >
-                <div className="flex items-center space-x-3 flex-1">
+                <div className="flex items-center space-x-3 flex-1 flex-wrap">
                   <span className="w-6 h-6 rounded-full bg-slate-800 text-blue-400 border border-slate-700 text-xs font-bold flex items-center justify-center">
                     {index + 1}
                   </span>
 
                   {/* Subject Input with datalist */}
-                  <div className="flex-1 max-w-xs">
+                  <div className="flex-1 min-w-[180px] max-w-xs">
                     <label className="text-[10px] text-slate-500 block mb-0.5 font-medium">Subject Name</label>
                     <div className="relative">
                       <input
@@ -769,9 +814,22 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
                     />
                   </div>
 
-                  {/* Available Badge */}
-                  <div className="text-[11px] text-slate-400 pt-4">
-                    Pool: <strong className="text-white">{availCount}</strong> available
+                  {/* Available Badge with Fresh Count */}
+                  <div className="text-[11px] text-slate-400 pt-3 flex flex-col gap-1">
+                    <span>
+                      Total Bank: <strong className="text-white">{availCount}</strong>
+                    </span>
+                    {excludeLastN > 0 && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                        freshCount >= sec.questionCount
+                          ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60'
+                          : 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
+                      }`}>
+                        {freshCount >= sec.questionCount
+                          ? `✓ ${freshCount} fresh unused (0 repeats)`
+                          : `⚠️ ${freshCount} fresh (${sec.questionCount - freshCount} may repeat)`}
+                      </span>
+                    )}
                   </div>
                 </div>
 
