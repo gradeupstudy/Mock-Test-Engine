@@ -25,6 +25,7 @@ import {
 } from '../lib/a4PaginationEngine';
 import { optimizePrintLayoutWithAi, AiLayoutOptimizationResult } from '../lib/aiClient';
 import { PRESET_LOGOS } from '../lib/paperLogos';
+import { BulkUploadWordExportModal } from './BulkUploadWordExportModal';
 import {
   Printer,
   FileDown,
@@ -69,7 +70,8 @@ import {
   ArrowRight,
   Split,
   GitFork,
-  Minimize2
+  Minimize2,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface PrintPaperViewProps {
@@ -123,6 +125,9 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
   // AI Auto-Fix State
   const [isAiOptimizing, setIsAiOptimizing] = useState<boolean>(false);
   const [aiOptimizationResult, setAiOptimizationResult] = useState<AiLayoutOptimizationResult | null>(null);
+
+  // Bulk Upload Word Export Modal state
+  const [isBulkUploadWordModalOpen, setIsBulkUploadWordModalOpen] = useState<boolean>(false);
   const [aiOptimizationBackup, setAiOptimizationBackup] = useState<{
     density: 'compact' | 'ultra-compact' | 'normal';
     page1Cap: number;
@@ -1201,6 +1206,17 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
             >
               <Layers className="w-3.5 h-3.5" />
               Download Combined PDF (Paper + Key)
+            </button>
+
+            {/* Bulk Upload Word File for device transfer */}
+            <button
+              onClick={() => setIsBulkUploadWordModalOpen(true)}
+              disabled={activeQuestions.length === 0}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-blue-300 hover:text-white border border-blue-500/40 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+              title="Export MCQs in Bulk Upload Word (.docx / .doc) format to transfer to another device"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+              Export Bulk Upload Word File
             </button>
 
             {exportMessage && (
@@ -3052,6 +3068,13 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
           </div>
         </div>
       )}
+      {/* Bulk Upload Word File Export Modal */}
+      <BulkUploadWordExportModal
+        isOpen={isBulkUploadWordModalOpen}
+        onClose={() => setIsBulkUploadWordModalOpen(false)}
+        questions={activeQuestions}
+        testName={testTitle}
+      />
     </div>
   );
 };

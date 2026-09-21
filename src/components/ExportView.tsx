@@ -7,6 +7,8 @@ import {
   exportPdfAnswerKey,
   exportDocxAnswerKey,
   exportAppOnlineMockTestDocx,
+  exportBulkUploadWordDocx,
+  exportBulkUploadWordDoc,
   printNativeTestPaper,
   printNativeAnswerKey,
   exportCompact2ColPdfTestPaper,
@@ -17,6 +19,7 @@ import {
 } from '../lib/exportUtils';
 import { PRESET_LOGOS } from '../lib/paperLogos';
 import { HtmlMockTestModal } from './HtmlMockTestModal';
+import { BulkUploadWordExportModal } from './BulkUploadWordExportModal';
 
 export function resolveMockQuestions(mock: MockHistory, allQuestions: Question[]): Question[] {
   // 1. If full question snapshot exists in mock.questions, return it directly!
@@ -61,7 +64,8 @@ import {
   Trash2,
   Loader2,
   Youtube,
-  Sparkles
+  Sparkles,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface ExportViewProps {
@@ -107,6 +111,17 @@ export const ExportView: React.FC<ExportViewProps> = ({
   const [htmlModalTestName, setHtmlModalTestName] = useState<string>('');
   const [htmlModalDuration, setHtmlModalDuration] = useState<number>(60);
   const [htmlModalMarks, setHtmlModalMarks] = useState<number>(100);
+
+  // Bulk Upload Word File Modal State
+  const [isBulkWordModalOpen, setIsBulkWordModalOpen] = useState<boolean>(false);
+  const [bulkWordModalQuestions, setBulkWordModalQuestions] = useState<Question[]>([]);
+  const [bulkWordModalTestName, setBulkWordModalTestName] = useState<string>('');
+
+  const handleOpenBulkWordModal = (qs: Question[], name: string) => {
+    setBulkWordModalQuestions(qs);
+    setBulkWordModalTestName(name);
+    setIsBulkWordModalOpen(true);
+  };
 
   const handleOpenHtmlMockModal = (qs: Question[], name: string, dur?: number, marks?: number) => {
     setHtmlModalQuestions(qs);
@@ -438,6 +453,58 @@ export const ExportView: React.FC<ExportViewProps> = ({
         </div>
       </div>
 
+      {/* Featured Card: Bulk Upload Word File */}
+      <div className="bg-gradient-to-r from-[#0d1b2a] via-[#1b263b] to-[#0f172a] border border-blue-500/40 p-6 rounded-2xl shadow-lg relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+          <FileSpreadsheet className="w-32 h-32 text-blue-400" />
+        </div>
+
+        <div className="relative z-10 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-3">
+              <div className="w-11 h-11 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-lg font-bold text-white">Bulk Upload Word File</h3>
+                  <span className="text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    Word (.docx / .doc) Format
+                  </span>
+                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    Device Transfer Ready
+                  </span>
+                </div>
+                <p className="text-xs text-blue-100/80 mt-0.5">
+                  Official Gradeup Bulk Upload table format (Subject, Chapter_Name, Question, Option_A..D, Answer, Explanation). Export your mock test MCQs and directly import them into Question Bank on any other computer or device.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 pt-2 flex-wrap gap-y-2">
+            <button
+              onClick={() => handleOpenBulkWordModal(currentQuestions, activeTestName)}
+              disabled={currentQuestions.length === 0}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md transition-colors flex items-center space-x-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export Current Mock Test ({currentQuestions.length} Qs)</span>
+            </button>
+
+            {mockHistory.length > 0 && (
+              <button
+                onClick={() => handleOpenBulkWordModal(getAllCreatedMocksQuestions(), 'All_Created_Mock_Tests')}
+                className="bg-slate-800 hover:bg-slate-700 text-blue-200 border border-blue-500/30 font-bold px-4 py-2.5 rounded-xl text-xs transition-colors flex items-center space-x-2"
+              >
+                <Layers className="w-4 h-4 text-blue-400" />
+                <span>Export All Created Mock Tests Combined ({getAllCreatedMocksQuestions().length} Qs)</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Featured Card 3: Interactive HTML Mock Test (Standalone CBT Exam with YouTube Gate) */}
       <div className="bg-gradient-to-r from-[#200c14] via-[#2c0e18] to-[#160a12] border border-red-500/40 p-6 rounded-2xl shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
@@ -686,6 +753,15 @@ export const ExportView: React.FC<ExportViewProps> = ({
                     </button>
 
                     <button
+                      onClick={() => handleOpenBulkWordModal(matchedQuestions, mock.testName)}
+                      className="flex items-center space-x-1.5 bg-blue-950/60 hover:bg-blue-600 text-blue-200 hover:text-white border border-blue-700/60 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      title="Export this mock test in Bulk Upload Word (.docx / .doc) format to import on another device"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Bulk Upload Word</span>
+                    </button>
+
+                    <button
                       onClick={() => handleExportAppOnlineMockTest(matchedQuestions, mock.testName)}
                       className="flex items-center space-x-1.5 bg-cyan-900/60 hover:bg-cyan-600 text-cyan-200 hover:text-white border border-cyan-700/60 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                       title="Export this mock test in App Online Word (.docx) format"
@@ -760,6 +836,14 @@ export const ExportView: React.FC<ExportViewProps> = ({
         testName={htmlModalTestName || activeTestName}
         duration={htmlModalDuration || activeDuration}
         totalMarks={htmlModalMarks || activeMarks}
+      />
+
+      {/* Bulk Upload Word File Export Modal */}
+      <BulkUploadWordExportModal
+        isOpen={isBulkWordModalOpen}
+        onClose={() => setIsBulkWordModalOpen(false)}
+        questions={bulkWordModalQuestions.length > 0 ? bulkWordModalQuestions : currentQuestions}
+        testName={bulkWordModalTestName || activeTestName}
       />
     </div>
   );

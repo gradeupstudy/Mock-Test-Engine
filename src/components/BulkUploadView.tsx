@@ -476,10 +476,16 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       if (fileExt === 'docx' || fileExt === 'doc') {
         let text = '';
         try {
-          const result = await mammoth.extractRawText({ arrayBuffer });
-          text = result.value || '';
+          // If binary DOCX, first try converting to HTML so table structure is preserved
+          const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
+          if (htmlResult && htmlResult.value && (htmlResult.value.includes('<table') || htmlResult.value.includes('<TABLE'))) {
+            text = htmlResult.value;
+          } else {
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            text = result.value || '';
+          }
         } catch (e) {
-          // Mammoth failed
+          // Mammoth failed (e.g. Word HTML .doc or .docx format)
         }
         if (!text.trim()) {
           text = await file.text();
@@ -550,34 +556,42 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
     const targetSub = customSubject || pasteSubject;
     const targetChap = customChapter || pasteChapter;
 
-    // Check if text contains HTML table (e.g. from Word .doc template)
+    // Check if text contains HTML table (e.g. from Word .doc template or docx HTML conversion)
     if (text.includes('<table') || text.includes('<TABLE')) {
       try {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
-        const table = doc.querySelector('table');
-        if (table) {
+        const tables = Array.from(doc.querySelectorAll('table'));
+        const allDataRows: any[] = [];
+
+        tables.forEach(table => {
           const rows = Array.from(table.querySelectorAll('tr'));
           if (rows.length > 1) {
             const headerCells = Array.from(rows[0].querySelectorAll('th, td')).map(cell => cell.textContent?.trim() || '');
-            const dataRows: any[] = [];
-            for (let i = 1; i < rows.length; i++) {
-              const cells = Array.from(rows[i].querySelectorAll('td, th')).map(cell => cell.textContent?.trim() || '');
-              if (cells.length > 0) {
-                const rowObj: Record<string, string> = {};
-                headerCells.forEach((h, idx) => {
-                  if (h) rowObj[h] = cells[idx] || '';
-                });
-                if (Object.keys(rowObj).length > 0) {
-                  dataRows.push(rowObj);
+            const hasQCol = headerCells.some(h => {
+              const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+              return clean.includes('question') || clean.includes('qtext') || clean.includes('stem') || clean.includes('option');
+            });
+            if (hasQCol) {
+              for (let i = 1; i < rows.length; i++) {
+                const cells = Array.from(rows[i].querySelectorAll('td, th')).map(cell => cell.textContent?.trim() || '');
+                if (cells.some(c => c.length > 0)) {
+                  const rowObj: Record<string, string> = {};
+                  headerCells.forEach((h, idx) => {
+                    if (h) rowObj[h] = cells[idx] || '';
+                  });
+                  if (Object.keys(rowObj).length > 0) {
+                    allDataRows.push(rowObj);
+                  }
                 }
               }
             }
-            if (dataRows.length > 0) {
-              processRawObjects(dataRows, sourceName, targetSub, targetChap);
-              return;
-            }
           }
+        });
+
+        if (allDataRows.length > 0) {
+          processRawObjects(allDataRows, sourceName, targetSub, targetChap);
+          return;
         }
       } catch (err) {
         console.error('HTML table parse error:', err);

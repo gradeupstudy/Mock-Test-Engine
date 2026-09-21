@@ -6,6 +6,7 @@ import { addMock, getAllExamPresets, saveExamPreset, deleteExamPreset, getAllMoc
 import { syncMockHistoryToSupabase } from '../lib/supabaseClient';
 import { GenerationProgressModal } from './GenerationProgressModal';
 import { HtmlMockTestModal } from './HtmlMockTestModal';
+import { BulkUploadWordExportModal } from './BulkUploadWordExportModal';
 import {
   Sparkles,
   Layers,
@@ -31,7 +32,8 @@ import {
   Edit3,
   FileEdit,
   Globe,
-  Youtube
+  Youtube,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface MockCreatorViewProps {
@@ -74,6 +76,9 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
 
   // HTML Mock Test Modal state
   const [isHtmlMockModalOpen, setIsHtmlMockModalOpen] = useState<boolean>(false);
+
+  // Bulk Upload Word File Modal state
+  const [isBulkUploadWordModalOpen, setIsBulkUploadWordModalOpen] = useState<boolean>(false);
 
   // Available subjects from imported questions
   const availableSubjects = useMemo(() => {
@@ -927,6 +932,15 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
 
           <div className="flex flex-wrap justify-end gap-3 pt-2">
             <button
+              onClick={() => setIsBulkUploadWordModalOpen(true)}
+              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md hover:shadow-blue-500/20 transition-all"
+              title="Export MCQs in Bulk Upload Word (.docx / .doc) format to easily import on another device"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Export Bulk Upload Word File</span>
+            </button>
+
+            <button
               onClick={() => setIsHtmlMockModalOpen(true)}
               className="flex items-center space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md hover:shadow-red-500/20 transition-all"
               title="Export standalone interactive HTML Mock Test with YouTube Subscribe Gate"
@@ -1427,6 +1441,16 @@ export const MockCreatorView: React.FC<MockCreatorViewProps> = ({
           testName={testName}
           duration={duration}
           totalMarks={totalMarks}
+        />
+      )}
+
+      {/* Bulk Upload Word File Export Modal */}
+      {iqseResult && (
+        <BulkUploadWordExportModal
+          isOpen={isBulkUploadWordModalOpen}
+          onClose={() => setIsBulkUploadWordModalOpen(false)}
+          questions={iqseResult.selectedQuestions}
+          testName={testName}
         />
       )}
     </div>

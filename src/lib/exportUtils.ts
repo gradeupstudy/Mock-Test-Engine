@@ -2985,3 +2985,295 @@ export function printNativeCompactAnswerKey(
   printWindow.document.close();
 }
 
+/**
+ * Exports MCQs in the official Gradeup Bulk Upload format as a Microsoft Word (.docx) file.
+ * Contains a table with columns:
+ * Subject, Chapter_Name, Question, Option_A, Option_B, Option_C, Option_D, Answer, Explanation
+ * This enables transferring mock test questions between devices and importing directly via Bulk Upload.
+ */
+export async function exportBulkUploadWordDocx(
+  questions: Question[],
+  testNameOverride?: string
+) {
+  if (!questions || questions.length === 0) {
+    alert('No questions available to export.');
+    return;
+  }
+
+  const safeTestName = (testNameOverride || 'Mock_Test_MCQs').trim();
+  const fileName = `${safeTestName.replace(/[^a-zA-Z0-9_\-\u0900-\u097F]/g, '_')}_Bulk_Upload.docx`;
+
+  const headers = [
+    { text: 'Subject', widthPct: 12 },
+    { text: 'Chapter_Name', widthPct: 12 },
+    { text: 'Question', widthPct: 32 },
+    { text: 'Option_A', widthPct: 9 },
+    { text: 'Option_B', widthPct: 9 },
+    { text: 'Option_C', widthPct: 9 },
+    { text: 'Option_D', widthPct: 9 },
+    { text: 'Answer', widthPct: 6 },
+    { text: 'Explanation', widthPct: 15 },
+  ];
+
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: headers.map(h =>
+      new TableCell({
+        width: { size: h.widthPct, type: WidthType.PERCENTAGE },
+        shading: { fill: '0D1233' },
+        margins: { top: 120, bottom: 120, left: 100, right: 100 },
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: h.text,
+                bold: true,
+                size: 18, // 9pt
+                color: 'FFFFFF',
+                font: { name: 'Calibri', cs: 'Mangal' }
+              })
+            ],
+            alignment: h.text === 'Answer' ? 'center' as any : 'left' as any
+          })
+        ]
+      })
+    )
+  });
+
+  const dataRows = questions.map((q, idx) => {
+    let qText = formatMathSymbols((q.question || '').trim());
+    if (q.translation && q.translation.trim() && !qText.includes(q.translation.trim())) {
+      qText += `\n${formatMathSymbols(q.translation.trim())}`;
+    }
+
+    const sub = q.subject || 'General Knowledge';
+    const chap = q.chapter || 'General';
+    const opA = formatMathSymbols(q.optionA || '');
+    const opB = formatMathSymbols(q.optionB || '');
+    const opC = formatMathSymbols(q.optionC || '');
+    const opD = formatMathSymbols(q.optionD || '');
+    const ans = (q.answer || 'A').toUpperCase().trim();
+    const exp = formatMathSymbols(q.explanation || '');
+
+    const cellsData = [
+      { text: sub, isBold: false, align: 'left', isAns: false },
+      { text: chap, isBold: false, align: 'left', isAns: false },
+      { text: qText, isBold: false, align: 'left', isAns: false },
+      { text: opA, isBold: false, align: 'left', isAns: false },
+      { text: opB, isBold: false, align: 'left', isAns: false },
+      { text: opC, isBold: false, align: 'left', isAns: false },
+      { text: opD, isBold: false, align: 'left', isAns: false },
+      { text: ans, isBold: true, align: 'center', isAns: true },
+      { text: exp, isBold: false, align: 'left', isAns: false },
+    ];
+
+    const isEven = idx % 2 === 1;
+
+    return new TableRow({
+      children: cellsData.map((c, cIdx) => {
+        const lines = c.text.split('\n');
+        return new TableCell({
+          width: { size: headers[cIdx].widthPct, type: WidthType.PERCENTAGE },
+          shading: isEven ? { fill: 'F8FAFC' } : undefined,
+          margins: { top: 80, bottom: 80, left: 100, right: 100 },
+          children: lines.map((l, lIdx) =>
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: l,
+                  bold: c.isBold,
+                  size: 18, // 9pt
+                  color: c.isAns ? '2563EB' : '1E293B',
+                  font: { name: 'Calibri', cs: 'Mangal' }
+                })
+              ],
+              alignment: c.align as any,
+              spacing: { after: lIdx === lines.length - 1 ? 0 : 40 }
+            })
+          )
+        });
+      })
+    });
+  });
+
+  const questionTable = new Table({
+    rows: [headerRow, ...dataRows],
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' },
+      left: { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' },
+      right: { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' }
+    }
+  });
+
+  const doc = new DocxDocument({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: { top: 720, bottom: 720, left: 720, right: 720 }
+          }
+        },
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `${safeTestName} - Bulk Upload MCQs`,
+                bold: true,
+                size: 26,
+                color: '0D1233',
+                font: { name: 'Calibri', cs: 'Mangal' }
+              })
+            ],
+            spacing: { after: 80 }
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `Total Questions: ${questions.length} | Format: Gradeup Bulk Upload Template (Subject, Chapter_Name, Question, Option_A, Option_B, Option_C, Option_D, Answer, Explanation)`,
+                size: 18,
+                color: '64748B',
+                font: { name: 'Calibri' }
+              })
+            ],
+            spacing: { after: 160 }
+          }),
+          questionTable
+        ]
+      }
+    ]
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Exports MCQs in the official Gradeup Bulk Upload format as a Word (.doc) HTML table document.
+ * Matches downloadWordTemplate() in BulkUploadView.
+ */
+export function exportBulkUploadWordDoc(
+  questions: Question[],
+  testNameOverride?: string
+) {
+  if (!questions || questions.length === 0) {
+    alert('No questions available to export.');
+    return;
+  }
+
+  const safeTestName = (testNameOverride || 'Mock_Test_MCQs').trim();
+  const fileName = `${safeTestName.replace(/[^a-zA-Z0-9_\-\u0900-\u097F]/g, '_')}_Bulk_Upload.doc`;
+
+  const escapeHtml = (str: string = '') => {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const rowsHtml = questions.map((q) => {
+    let qText = formatMathSymbols((q.question || '').trim());
+    if (q.translation && q.translation.trim() && !qText.includes(q.translation.trim())) {
+      qText += `\n${formatMathSymbols(q.translation.trim())}`;
+    }
+
+    const sub = q.subject || 'General Knowledge';
+    const chap = q.chapter || 'General';
+    const opA = formatMathSymbols(q.optionA || '');
+    const opB = formatMathSymbols(q.optionB || '');
+    const opC = formatMathSymbols(q.optionC || '');
+    const opD = formatMathSymbols(q.optionD || '');
+    const ans = (q.answer || 'A').toUpperCase().trim();
+    const exp = formatMathSymbols(q.explanation || '');
+
+    return `
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(sub)}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(chap)}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(qText).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opA).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opB).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opC).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opD).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt; font-weight: bold; color: #2563eb; text-align: center;">${escapeHtml(ans)}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(exp).replace(/\n/g, '<br/>')}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const htmlContent = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset='utf-8'>
+      <title>${escapeHtml(safeTestName)} - Bulk Upload MCQs</title>
+      <!--[if gte mso 9]>
+      <xml>
+        <w:WordDocument>
+          <w:View>Print</w:View>
+          <w:Zoom>100</w:Zoom>
+          <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+      </xml>
+      <![endif]-->
+      <style>
+        body { font-family: Calibri, 'Segoe UI', Arial, 'Mangal', sans-serif; font-size: 10pt; color: #1e293b; line-height: 1.4; }
+        h2 { color: #0d1233; font-size: 14pt; margin-bottom: 4px; }
+        p { color: #64748b; font-size: 9.5pt; margin-bottom: 12px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 9.5pt; }
+        th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background-color: #0d1233; color: #ffffff; font-weight: bold; text-transform: uppercase; font-size: 8.5pt; }
+        tr:nth-child(even) { background-color: #f8fafc; }
+        .answer { font-weight: bold; color: #2563eb; text-align: center; }
+      </style>
+    </head>
+    <body>
+      <h2>${escapeHtml(safeTestName)} - Bulk Upload MCQs</h2>
+      <p>Total Questions: ${questions.length} | Official Gradeup Bulk Upload Template format. Ready for import into any project instance.</p>
+      <table>
+        <thead>
+          <tr>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Subject</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Chapter_Name</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Question</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Option_A</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Option_B</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Option_C</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Option_D</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Answer</th>
+            <th style="background-color: #0d1233; color: #ffffff; font-weight: bold;">Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff' + htmlContent], {
+    type: 'application/msword;charset=utf-8'
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', fileName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+
