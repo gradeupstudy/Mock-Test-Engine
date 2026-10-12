@@ -2113,7 +2113,33 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
-                            const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+                            const hasAnyOptImage = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
+                            const isShort = !hasAnyOptImage && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+
+                            const optAElement = (
+                              <div className="flex flex-col">
+                                <span>{optA}</span>
+                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optBElement = (
+                              <div className="flex flex-col">
+                                <span>{optB}</span>
+                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optCElement = (
+                              <div className="flex flex-col">
+                                <span>{optC}</span>
+                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optDElement = (
+                              <div className="flex flex-col">
+                                <span>{optD}</span>
+                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
 
                             const showQuestionText = splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab';
                             const showOptAB = splitType === 'full' || splitType === 'options_only' || splitType === 'options_ab';
@@ -2248,6 +2274,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                           <span>{formatMathSymbols(q.question)}</span>
                                         )}
                                       </div>
+                                      {q.questionImage && (
+                                        <div className="my-1 text-center w-full">
+                                          <img src={q.questionImage} alt="Diagram" className="max-h-36 max-w-full object-contain mx-auto rounded" />
+                                        </div>
+                                      )}
                                       {splitType === 'question_only' && (
                                         <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
                                           Q ONLY
@@ -2319,24 +2350,24 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     {showOptAB && showOptCD ? (
                                       isShort ? (
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       ) : (
                                         <div className="flex flex-col gap-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       )
                                     ) : showOptAB && !showOptCD ? (
                                       <div className="space-y-0.5">
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
                                         </div>
                                         <div className="flex items-center justify-between text-[8.5px] text-purple-600 italic bg-purple-50 px-1 py-0.2 rounded border border-dashed border-purple-200">
                                           <span>(C) & (D) on next col/page ⮞</span>
@@ -2351,8 +2382,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     ) : (
                                       <div className="space-y-0.5">
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       </div>
                                     )}
@@ -2401,7 +2432,33 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             const optB = `(B) ${formatMathSymbols(q.optionB || '')}`;
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
-                            const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+                            const hasAnyOptImage = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
+                            const isShort = !hasAnyOptImage && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+
+                            const optAElement = (
+                              <div className="flex flex-col">
+                                <span>{optA}</span>
+                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optBElement = (
+                              <div className="flex flex-col">
+                                <span>{optB}</span>
+                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optCElement = (
+                              <div className="flex flex-col">
+                                <span>{optC}</span>
+                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
+                            const optDElement = (
+                              <div className="flex flex-col">
+                                <span>{optD}</span>
+                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                              </div>
+                            );
 
                             const showQuestionText = splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab';
                             const showOptAB = splitType === 'full' || splitType === 'options_only' || splitType === 'options_ab';
@@ -2535,6 +2592,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                           <span>{formatMathSymbols(q.question)}</span>
                                         )}
                                       </div>
+                                      {q.questionImage && (
+                                        <div className="my-1 text-center w-full">
+                                          <img src={q.questionImage} alt="Diagram" className="max-h-36 max-w-full object-contain mx-auto rounded" />
+                                        </div>
+                                      )}
                                       {splitType === 'question_only' && (
                                         <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
                                           Q ONLY
@@ -2606,24 +2668,24 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     {showOptAB && showOptCD ? (
                                       isShort ? (
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       ) : (
                                         <div className="flex flex-col gap-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       )
                                     ) : showOptAB && !showOptCD ? (
                                       <div className="space-y-0.5">
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optA}</div>
-                                          <div>{optB}</div>
+                                          <div>{optAElement}</div>
+                                          <div>{optBElement}</div>
                                         </div>
                                         <div className="flex items-center justify-between text-[8.5px] text-purple-600 italic bg-purple-50 px-1 py-0.2 rounded border border-dashed border-purple-200">
                                           <span>(C) & (D) on next col/page ⮞</span>
@@ -2638,8 +2700,8 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                     ) : (
                                       <div className="space-y-0.5">
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] text-black">
-                                          <div>{optC}</div>
-                                          <div>{optD}</div>
+                                          <div>{optCElement}</div>
+                                          <div>{optDElement}</div>
                                         </div>
                                       </div>
                                     )}
@@ -2821,6 +2883,11 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                       <div className="mt-1 pt-1 border-t border-slate-200 text-slate-800 bg-slate-50 p-1.5 rounded">
                         <strong>Explanation: </strong>
                         {q.explanation ? formatMathSymbols(q.explanation) : `Option ${q.answer} is the correct answer.`}
+                        {q.explanationImage && (
+                          <div className="mt-1 text-center">
+                            <img src={q.explanationImage} alt="Solution Diagram" className="max-h-28 max-w-full object-contain mx-auto rounded" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

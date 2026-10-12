@@ -28,13 +28,19 @@ export interface Question {
   subject: string;
   chapter: string;
   question: string;
+  questionImage?: string; // base64 data URL or image URL
   translation?: string;
   optionA: string;
+  optionAImage?: string;
   optionB: string;
+  optionBImage?: string;
   optionC: string;
+  optionCImage?: string;
   optionD: string;
+  optionDImage?: string;
   answer: 'A' | 'B' | 'C' | 'D';
   explanation?: string;
+  explanationImage?: string;
   difficulty: DifficultyLevel;
   usageCount: number;
   lastUsedMockId?: number;

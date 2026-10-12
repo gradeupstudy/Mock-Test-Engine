@@ -30,12 +30,16 @@ import {
   Loader2,
   X,
   Archive,
-  ShieldCheck
+  ShieldCheck,
+  Image as ImageIcon,
+  Maximize2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import { ungzip } from 'pako';
+import { ImageMcqBulkUploadSection, ImageMcqDraft } from './ImageMcqBulkUploadSection';
+import { parseImageMcqZip, downloadSampleImageMcqZip } from '../lib/imageMcqUtils';
 
 interface BulkUploadViewProps {
   onImportSuccess: (importedCount: number) => void;
@@ -49,12 +53,18 @@ interface ParsedRow {
   subject: string;
   chapter: string;
   question: string;
+  questionImage?: string;
   optionA: string;
+  optionAImage?: string;
   optionB: string;
+  optionBImage?: string;
   optionC: string;
+  optionCImage?: string;
   optionD: string;
+  optionDImage?: string;
   answer: string;
   explanation?: string;
+  explanationImage?: string;
   difficulty: 'Easy' | 'Moderate' | 'Hard';
   isValid: boolean;
   validationErrors: string[];
@@ -67,12 +77,15 @@ export const BulkUploadView: React.FC<BulkUploadViewProps> = ({
   geminiApiKey
 }) => {
   // Tab State
-  const [activeTab, setActiveTab] = useState<'file' | 'paste' | 'generator' | 'templates'>('file');
+  const [activeTab, setActiveTab] = useState<'file' | 'image_mcq' | 'paste' | 'generator' | 'templates'>('file');
 
   // Parsed Questions List
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+
+  // Full-size Preview Image Modal
+  const [previewImageModal, setPreviewImageModal] = useState<{ url: string; title: string } | null>(null);
 
   // Filter State for Parsed Table
   const [filterStatus, setFilterStatus] = useState<'all' | 'valid' | 'invalid' | 'duplicates'>('all');
@@ -203,16 +216,77 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
   // Validation function
   const validateRow = (row: Partial<ParsedRow>): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
-    if (!row.question || row.question.trim().length < 5) errors.push('Question text missing or too short');
-    if (!row.optionA?.trim()) errors.push('Option A missing');
-    if (!row.optionB?.trim()) errors.push('Option B missing');
-    if (!row.optionC?.trim()) errors.push('Option C missing');
-    if (!row.optionD?.trim()) errors.push('Option D missing');
+    const hasQuestion = (row.question && row.question.trim().length >= 2) || !!row.questionImage;
+    if (!hasQuestion) errors.push('Question statement or diagram missing');
+
+    const hasOptA = !!row.optionA?.trim() || !!row.optionAImage;
+    if (!hasOptA) errors.push('Option A (text or image) missing');
+
+    const hasOptB = !!row.optionB?.trim() || !!row.optionBImage;
+    if (!hasOptB) errors.push('Option B (text or image) missing');
+
+    const hasOptC = !!row.optionC?.trim() || !!row.optionCImage;
+    if (!hasOptC) errors.push('Option C (text or image) missing');
+
+    const hasOptD = !!row.optionD?.trim() || !!row.optionDImage;
+    if (!hasOptD) errors.push('Option D (text or image) missing');
 
     const ans = (row.answer || '').trim().toUpperCase();
     if (!['A', 'B', 'C', 'D'].includes(ans)) errors.push('Answer must be A, B, C, or D');
 
     return { isValid: errors.length === 0, errors };
+  };
+
+  // Handler for adding Image MCQ drafts to parsedRows review table
+  const handleAddImageDraftsToParsedRows = (drafts: ImageMcqDraft[]) => {
+    const convertedRows: ParsedRow[] = drafts.map(d => {
+      const rowData: Partial<ParsedRow> = {
+        idTemp: d.idTemp,
+        subject: d.subject || 'General',
+        chapter: d.chapter || 'General',
+        question: d.question,
+        questionImage: d.questionImage,
+        optionA: d.optionA,
+        optionAImage: d.optionAImage,
+        optionB: d.optionB,
+        optionBImage: d.optionBImage,
+        optionC: d.optionC,
+        optionCImage: d.optionCImage,
+        optionD: d.optionD,
+        optionDImage: d.optionDImage,
+        answer: d.answer,
+        explanation: d.explanation,
+        explanationImage: d.explanationImage,
+        difficulty: d.difficulty
+      };
+      const val = validateRow(rowData);
+      return {
+        idTemp: d.idTemp,
+        subject: d.subject || 'General',
+        chapter: d.chapter || 'General',
+        question: d.question,
+        questionImage: d.questionImage,
+        optionA: d.optionA,
+        optionAImage: d.optionAImage,
+        optionB: d.optionB,
+        optionBImage: d.optionBImage,
+        optionC: d.optionC,
+        optionCImage: d.optionCImage,
+        optionD: d.optionD,
+        optionDImage: d.optionDImage,
+        answer: (['A', 'B', 'C', 'D'].includes(d.answer) ? d.answer : 'A'),
+        explanation: d.explanation,
+        explanationImage: d.explanationImage,
+        difficulty: d.difficulty,
+        isValid: val.isValid,
+        validationErrors: val.errors
+      };
+    });
+
+    setParsedRows(prev => [...prev, ...convertedRows]);
+    setFileName('Image Form MCQs Batch');
+    setAiStatusMessage(`Added ${convertedRows.length} Image MCQs to review table below. Ready to inspect and import!`);
+    setTimeout(() => setAiStatusMessage(null), 6000);
   };
 
   // Helper to extract questions array from various parsed JSON structures (Backups, Exports, Question Bank objects)
@@ -295,11 +369,22 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
         : (extractedChap || 'General');
 
       const question = obj.question || findVal(['question', 'stem', 'qtext', 'q_text', 'questiontext', 'q']);
+      const questionImage = obj.questionImage || obj.question_image || obj.qImage || obj.q_image || obj.image || findVal(['questionimage', 'question_image', 'qimage', 'q_image', 'qimg', 'questionimg', 'diagram']);
+
       const optionA = obj.optionA || obj.option_a || findVal(['optiona', 'option_a', 'opta', 'opt1', 'option1', 'a']);
+      const optionAImage = obj.optionAImage || obj.option_a_image || obj.optAImage || obj.opta_image || findVal(['optionaimage', 'optiona_image', 'optaimage', 'opt1image', 'aimage', 'opt_a_img']);
+
       const optionB = obj.optionB || obj.option_b || findVal(['optionb', 'option_b', 'optb', 'opt2', 'option2', 'b']);
+      const optionBImage = obj.optionBImage || obj.option_b_image || obj.optBImage || obj.optb_image || findVal(['optionbimage', 'optionb_image', 'optbimage', 'opt2image', 'bimage', 'opt_b_img']);
+
       const optionC = obj.optionC || obj.option_c || findVal(['optionc', 'option_c', 'optc', 'opt3', 'option3', 'c']);
+      const optionCImage = obj.optionCImage || obj.option_c_image || obj.optCImage || obj.optc_image || findVal(['optioncimage', 'optionc_image', 'optcimage', 'opt3image', 'cimage', 'opt_c_img']);
+
       const optionD = obj.optionD || obj.option_d || findVal(['optiond', 'option_d', 'optd', 'opt4', 'option4', 'd']);
+      const optionDImage = obj.optionDImage || obj.option_d_image || obj.optDImage || obj.optd_image || findVal(['optiondimage', 'optiond_image', 'optdimage', 'opt4image', 'dimage', 'opt_d_img']);
+
       const explanation = obj.explanation || obj.exp || findVal(['explanation', 'exp', 'solution', 'rationale', 'expl']);
+      const explanationImage = obj.explanationImage || obj.explanation_image || obj.expImage || obj.solImage || findVal(['explanationimage', 'explanation_image', 'expimage', 'solutionimage', 'expimg', 'solution_img']);
 
       let answer = (obj.answer || findVal(['answer', 'ans', 'correct', 'correctans', 'correctanswer', 'answerkey'])).toUpperCase().trim();
       answer = answer.replace(/^OPTION\s*/i, '').replace(/[\(\)\[\]]/g, '').trim();
@@ -317,12 +402,18 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
         subject,
         chapter,
         question,
+        questionImage,
         optionA,
+        optionAImage,
         optionB,
+        optionBImage,
         optionC,
+        optionCImage,
         optionD,
+        optionDImage,
         answer,
         explanation,
+        explanationImage,
         difficulty
       };
 
@@ -333,12 +424,18 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
         subject,
         chapter,
         question,
+        questionImage,
         optionA,
+        optionAImage,
         optionB,
+        optionBImage,
         optionC,
+        optionCImage,
         optionD,
+        optionDImage,
         answer: ['A', 'B', 'C', 'D'].includes(answer) ? answer : 'A',
         explanation,
+        explanationImage,
         difficulty,
         isValid: val.isValid,
         validationErrors: val.errors
@@ -366,9 +463,18 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       const isZipSignature = uint8.length >= 4 && uint8[0] === 0x50 && uint8[1] === 0x4b;
       const isGzipSignature = uint8.length >= 2 && uint8[0] === 0x1f && uint8[1] === 0x8b;
 
-      // 1. Handle ZIP Archives (.zip backup files containing JSON, GZ, or sheets)
+      // 1. Handle ZIP Archives (.zip files containing Images, Excel/JSON sheets, or backups)
       if (isZipSignature || fileExt === 'zip') {
         try {
+          // Check for Image MCQ ZIP package (containing image files and spreadsheet/json)
+          const imageZipResult = await parseImageMcqZip(arrayBuffer);
+          if (imageZipResult.questions && imageZipResult.questions.length > 0) {
+            processRawObjects(imageZipResult.questions, file.name);
+            setAiStatusMessage(imageZipResult.message || `Successfully loaded ${imageZipResult.questions.length} MCQs from ZIP archive "${file.name}".`);
+            setTimeout(() => setAiStatusMessage(null), 6000);
+            return;
+          }
+
           const zip = await JSZip.loadAsync(arrayBuffer);
           const extractedQuestions: any[] = [];
           const zipFiles = Object.keys(zip.files);
@@ -476,9 +582,24 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       if (fileExt === 'docx' || fileExt === 'doc') {
         let text = '';
         try {
-          // If binary DOCX, first try converting to HTML so table structure is preserved
-          const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
-          if (htmlResult && htmlResult.value && (htmlResult.value.includes('<table') || htmlResult.value.includes('<TABLE'))) {
+          // If binary DOCX, first try converting to HTML with embedded images preserved
+          const htmlResult = await mammoth.convertToHtml(
+            { arrayBuffer },
+            {
+              convertImage: mammoth.images.imgElement((image: any) => {
+                return image.read('base64').then((imageBuffer: string) => ({
+                  src: `data:${image.contentType};base64,${imageBuffer}`
+                }));
+              })
+            }
+          );
+          if (
+            htmlResult &&
+            htmlResult.value &&
+            (htmlResult.value.includes('<table') ||
+              htmlResult.value.includes('<TABLE') ||
+              htmlResult.value.includes('<img'))
+          ) {
             text = htmlResult.value;
           } else {
             const result = await mammoth.extractRawText({ arrayBuffer });
@@ -1324,12 +1445,18 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
       subject: r.subject || 'General',
       chapter: r.chapter || 'General',
       question: r.question,
+      questionImage: r.questionImage,
       optionA: r.optionA,
+      optionAImage: r.optionAImage,
       optionB: r.optionB,
+      optionBImage: r.optionBImage,
       optionC: r.optionC,
+      optionCImage: r.optionCImage,
       optionD: r.optionD,
+      optionDImage: r.optionDImage,
       answer: (['A', 'B', 'C', 'D'].includes(r.answer.toUpperCase()) ? r.answer.toUpperCase() : 'A') as 'A' | 'B' | 'C' | 'D',
       explanation: r.explanation || `Option ${r.answer} is the correct answer.`,
+      explanationImage: r.explanationImage,
       difficulty: r.difficulty || 'Moderate',
       usageCount: 0,
       questionStatus: 'Fresh',
@@ -1412,6 +1539,21 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span>File Upload (ZIP / Excel / Word / CSV)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('image_mcq')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+            activeTab === 'image_mcq'
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
+              : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4 text-sky-300" />
+          <span>Image Form MCQs (Photo / Diagrams)</span>
+          <span className="bg-sky-400/20 text-sky-300 text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-sky-400/30">
+            NEW
+          </span>
         </button>
 
         <button
@@ -1521,6 +1663,15 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             </div>
           </div>
         </div>
+      )}
+
+      {/* Tab: Image Form MCQs Bulk Upload */}
+      {activeTab === 'image_mcq' && (
+        <ImageMcqBulkUploadSection
+          onAddParsedRows={handleAddImageDraftsToParsedRows}
+          existingSubjects={existingSubjects}
+          existingChapters={existingChapters}
+        />
       )}
 
       {/* Tab 2: Paste Raw Text */}
@@ -1867,7 +2018,7 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Excel Template */}
             <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3 flex flex-col justify-between hover:border-emerald-500/40 transition-colors">
               <div className="space-y-2">
@@ -1925,6 +2076,26 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download CSV (.csv)</span>
+              </button>
+            </div>
+
+            {/* Image MCQs ZIP Template */}
+            <div className="p-4 bg-slate-950 border border-purple-500/30 rounded-xl space-y-3 flex flex-col justify-between hover:border-purple-500/60 transition-colors">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2.5 text-purple-400 font-semibold text-xs">
+                  <ImageIcon className="w-5 h-5" />
+                  <span>Image Form MCQs (.zip)</span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Complete package with sample Excel/JSON and images folder for diagrams in Questions, Options & Solutions.
+                </p>
+              </div>
+              <button
+                onClick={downloadSampleImageMcqZip}
+                className="w-full flex items-center justify-center space-x-1.5 bg-purple-600 hover:bg-purple-500 text-white font-medium px-4 py-2 rounded-lg text-xs transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Image ZIP</span>
               </button>
             </div>
           </div>
@@ -2314,6 +2485,13 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
                               <span>In Bank ({bankMatchCount}x)</span>
                             </span>
                           )}
+
+                          {(row.questionImage || row.optionAImage || row.optionBImage || row.optionCImage || row.optionDImage || row.explanationImage) && (
+                            <span className="inline-flex items-center space-x-1 text-sky-300 text-[9px] bg-sky-950/90 px-2 py-0.5 rounded-full border border-sky-500/50 font-bold">
+                              <ImageIcon className="w-3 h-3 text-sky-400" />
+                              <span>Has Images</span>
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -2344,6 +2522,21 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
 
                       {/* Question Text & Explanation */}
                       <td className="px-3 py-3 max-w-[320px]">
+                        {row.questionImage && (
+                          <div className="mb-2 flex items-center space-x-2">
+                            <img
+                              src={row.questionImage}
+                              alt="Question Diagram"
+                              className="max-h-14 max-w-[110px] object-contain rounded border border-slate-700 bg-black/40 cursor-pointer hover:border-blue-400 transition-colors"
+                              onClick={() => setPreviewImageModal({ url: row.questionImage!, title: `Question Diagram #${row.idTemp}` })}
+                              title="Click to view full size"
+                            />
+                            <span className="text-[9px] bg-blue-950 text-blue-300 border border-blue-800 px-1.5 py-0.5 rounded font-bold">
+                              Q Diagram
+                            </span>
+                          </div>
+                        )}
+
                         {isEditing ? (
                           <div className="space-y-1.5">
                             <div>
@@ -2369,6 +2562,20 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
                         ) : (
                           <div className="space-y-1">
                             <p className="line-clamp-2 text-white font-medium">{formatMathSymbols(row.question)}</p>
+                            {row.explanationImage && (
+                              <div className="mt-1 flex items-center space-x-2">
+                                <img
+                                  src={row.explanationImage}
+                                  alt="Solution Diagram"
+                                  className="max-h-12 max-w-[90px] object-contain rounded border border-purple-800 bg-black/40 cursor-pointer hover:border-purple-400 transition-colors"
+                                  onClick={() => setPreviewImageModal({ url: row.explanationImage!, title: `Explanation Solution Diagram` })}
+                                  title="Click to view solution diagram"
+                                />
+                                <span className="text-[9px] bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded font-bold">
+                                  Solution Diagram
+                                </span>
+                              </div>
+                            )}
                             {row.explanation ? (
                               <div className="bg-slate-950/80 border border-slate-800 rounded p-1.5 text-[10px] text-blue-300/90 flex items-start space-x-1">
                                 <Sparkles className="w-3 h-3 text-blue-400 shrink-0 mt-0.5" />
@@ -2386,6 +2593,50 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
 
                       {/* Options */}
                       <td className="px-3 py-3 max-w-[240px]">
+                        {(row.optionAImage || row.optionBImage || row.optionCImage || row.optionDImage) && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {row.optionAImage && (
+                              <div
+                                className="relative cursor-pointer group"
+                                onClick={() => setPreviewImageModal({ url: row.optionAImage!, title: 'Option A Image' })}
+                                title="Option A Image"
+                              >
+                                <img src={row.optionAImage} alt="Opt A" className="h-8 w-8 object-contain rounded border border-slate-700 bg-black/40" />
+                                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[8px] font-bold px-1 rounded">A</span>
+                              </div>
+                            )}
+                            {row.optionBImage && (
+                              <div
+                                className="relative cursor-pointer group"
+                                onClick={() => setPreviewImageModal({ url: row.optionBImage!, title: 'Option B Image' })}
+                                title="Option B Image"
+                              >
+                                <img src={row.optionBImage} alt="Opt B" className="h-8 w-8 object-contain rounded border border-slate-700 bg-black/40" />
+                                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[8px] font-bold px-1 rounded">B</span>
+                              </div>
+                            )}
+                            {row.optionCImage && (
+                              <div
+                                className="relative cursor-pointer group"
+                                onClick={() => setPreviewImageModal({ url: row.optionCImage!, title: 'Option C Image' })}
+                                title="Option C Image"
+                              >
+                                <img src={row.optionCImage} alt="Opt C" className="h-8 w-8 object-contain rounded border border-slate-700 bg-black/40" />
+                                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[8px] font-bold px-1 rounded">C</span>
+                              </div>
+                            )}
+                            {row.optionDImage && (
+                              <div
+                                className="relative cursor-pointer group"
+                                onClick={() => setPreviewImageModal({ url: row.optionDImage!, title: 'Option D Image' })}
+                                title="Option D Image"
+                              >
+                                <img src={row.optionDImage} alt="Opt D" className="h-8 w-8 object-contain rounded border border-slate-700 bg-black/40" />
+                                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[8px] font-bold px-1 rounded">D</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {isEditing ? (
                           <div className="grid grid-cols-2 gap-1 text-[10px]">
                             <input
@@ -2539,6 +2790,39 @@ Exp: 15% of 400 = (15 / 100) * 400 = 60.`
             </div>
             <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
               <div className="h-full bg-blue-500 animate-pulse rounded-full w-full" />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Full-Screen Image Zoom Modal */}
+      {previewImageModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setPreviewImageModal(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+              <span className="text-sm font-bold text-white flex items-center space-x-2">
+                <ImageIcon className="w-4 h-4 text-sky-400" />
+                <span>{previewImageModal.title}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewImageModal(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 flex items-center justify-center bg-slate-950 overflow-auto max-h-[calc(90vh-70px)]">
+              <img
+                src={previewImageModal.url}
+                alt="Full preview"
+                className="max-h-[75vh] max-w-full object-contain rounded-lg shadow"
+              />
             </div>
           </div>
         </div>

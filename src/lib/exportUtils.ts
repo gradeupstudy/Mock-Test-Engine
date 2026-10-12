@@ -3191,24 +3191,54 @@ export function exportBulkUploadWordDoc(
 
     const sub = q.subject || 'General Knowledge';
     const chap = q.chapter || 'General';
-    const opA = formatMathSymbols(q.optionA || '');
-    const opB = formatMathSymbols(q.optionB || '');
-    const opC = formatMathSymbols(q.optionC || '');
-    const opD = formatMathSymbols(q.optionD || '');
+    let opA = formatMathSymbols(q.optionA || '');
+    let opB = formatMathSymbols(q.optionB || '');
+    let opC = formatMathSymbols(q.optionC || '');
+    let opD = formatMathSymbols(q.optionD || '');
     const ans = (q.answer || 'A').toUpperCase().trim();
-    const exp = formatMathSymbols(q.explanation || '');
+    let exp = formatMathSymbols(q.explanation || '');
+
+    let qHtml = escapeHtml(qText).replace(/\n/g, '<br/>');
+    if (q.questionImage) {
+      qHtml += `<br/><img src="${q.questionImage}" style="max-height: 120px; max-width: 100%; display: block; margin-top: 4px;" />`;
+    }
+
+    let opAHtml = escapeHtml(opA).replace(/\n/g, '<br/>');
+    if (q.optionAImage) {
+      opAHtml += `<br/><img src="${q.optionAImage}" style="max-height: 70px; max-width: 100%; display: block; margin-top: 2px;" />`;
+    }
+
+    let opBHtml = escapeHtml(opB).replace(/\n/g, '<br/>');
+    if (q.optionBImage) {
+      opBHtml += `<br/><img src="${q.optionBImage}" style="max-height: 70px; max-width: 100%; display: block; margin-top: 2px;" />`;
+    }
+
+    let opCHtml = escapeHtml(opC).replace(/\n/g, '<br/>');
+    if (q.optionCImage) {
+      opCHtml += `<br/><img src="${q.optionCImage}" style="max-height: 70px; max-width: 100%; display: block; margin-top: 2px;" />`;
+    }
+
+    let opDHtml = escapeHtml(opD).replace(/\n/g, '<br/>');
+    if (q.optionDImage) {
+      opDHtml += `<br/><img src="${q.optionDImage}" style="max-height: 70px; max-width: 100%; display: block; margin-top: 2px;" />`;
+    }
+
+    let expHtml = escapeHtml(exp).replace(/\n/g, '<br/>');
+    if (q.explanationImage) {
+      expHtml += `<br/><img src="${q.explanationImage}" style="max-height: 100px; max-width: 100%; display: block; margin-top: 4px;" />`;
+    }
 
     return `
       <tr>
         <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(sub)}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(chap)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(qText).replace(/\n/g, '<br/>')}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opA).replace(/\n/g, '<br/>')}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opB).replace(/\n/g, '<br/>')}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opC).replace(/\n/g, '<br/>')}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(opD).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${qHtml}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${opAHtml}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${opBHtml}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${opCHtml}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${opDHtml}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt; font-weight: bold; color: #2563eb; text-align: center;">${escapeHtml(ans)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${escapeHtml(exp).replace(/\n/g, '<br/>')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 9.5pt;">${expHtml}</td>
       </tr>
     `;
   }).join('');

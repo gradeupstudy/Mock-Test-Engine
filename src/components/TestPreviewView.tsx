@@ -1514,6 +1514,11 @@ Return ONLY valid JSON matching this schema:
               {/* Question Textarea & Math Toolbar */}
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-400 font-medium block">Question Statement</label>
+                {q.questionImage && (
+                  <div className="mb-2 p-2 bg-slate-950/80 rounded-xl border border-blue-900/40 flex items-center justify-center">
+                    <img src={q.questionImage} alt="Question Diagram" className="max-h-36 max-w-full object-contain rounded" />
+                  </div>
+                )}
                 <textarea
                   rows={2}
                   value={q.question}
@@ -1558,6 +1563,11 @@ Return ONLY valid JSON matching this schema:
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">Option A</label>
+                  {q.optionAImage && (
+                    <div className="mb-1 p-1 bg-slate-950/80 rounded border border-slate-800 flex items-center justify-center">
+                      <img src={q.optionAImage} alt="Option A" className="max-h-20 max-w-full object-contain rounded" />
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={q.optionA}
@@ -1568,6 +1578,11 @@ Return ONLY valid JSON matching this schema:
 
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">Option B</label>
+                  {q.optionBImage && (
+                    <div className="mb-1 p-1 bg-slate-950/80 rounded border border-slate-800 flex items-center justify-center">
+                      <img src={q.optionBImage} alt="Option B" className="max-h-20 max-w-full object-contain rounded" />
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={q.optionB}
@@ -1578,6 +1593,11 @@ Return ONLY valid JSON matching this schema:
 
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">Option C</label>
+                  {q.optionCImage && (
+                    <div className="mb-1 p-1 bg-slate-950/80 rounded border border-slate-800 flex items-center justify-center">
+                      <img src={q.optionCImage} alt="Option C" className="max-h-20 max-w-full object-contain rounded" />
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={q.optionC}
@@ -1588,6 +1608,11 @@ Return ONLY valid JSON matching this schema:
 
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">Option D</label>
+                  {q.optionDImage && (
+                    <div className="mb-1 p-1 bg-slate-950/80 rounded border border-slate-800 flex items-center justify-center">
+                      <img src={q.optionDImage} alt="Option D" className="max-h-20 max-w-full object-contain rounded" />
+                    </div>
+                  )}
                   <input
                     type="text"
                     value={q.optionD}
@@ -1670,6 +1695,13 @@ Return ONLY valid JSON matching this schema:
                       <div className="text-xs text-purple-100 leading-relaxed font-sans bg-slate-950/80 p-3 rounded-lg border border-purple-900/50 shadow-inner">
                         <MathText text={q.explanation} />
                       </div>
+                    </div>
+                  )}
+
+                  {q.explanationImage && (
+                    <div className="mt-2 p-2 bg-slate-950/80 rounded-xl border border-purple-900/50 flex flex-col items-center justify-center">
+                      <span className="text-[10px] text-purple-300 font-bold mb-1">Solution Diagram:</span>
+                      <img src={q.explanationImage} alt="Solution Diagram" className="max-h-40 max-w-full object-contain rounded" />
                     </div>
                   )}
                 </div>

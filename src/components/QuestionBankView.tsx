@@ -1481,7 +1481,40 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                         <div className="text-[10px] text-slate-400">{q.chapter}</div>
                       </td>
                       <td className="p-3">
+                        {q.questionImage && (
+                          <div className="mb-2 flex items-center space-x-2">
+                            <img
+                              src={q.questionImage}
+                              alt="Question Diagram"
+                              className="max-h-16 max-w-[130px] object-contain rounded border border-slate-700 bg-black/40"
+                            />
+                            <span className="text-[9px] bg-blue-950 text-blue-300 border border-blue-800 px-1.5 py-0.5 rounded font-bold">
+                              Diagram
+                            </span>
+                          </div>
+                        )}
                         <p className="line-clamp-2 text-white font-medium">{formatMathSymbols(q.question)}</p>
+                        {(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage) && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[10px] text-sky-300 bg-sky-950/40 border border-sky-800/50 px-2 py-0.5 rounded w-fit">
+                            <span>🖼️ Options:</span>
+                            {q.optionAImage && <span className="font-bold bg-blue-900/60 px-1 rounded">A</span>}
+                            {q.optionBImage && <span className="font-bold bg-blue-900/60 px-1 rounded">B</span>}
+                            {q.optionCImage && <span className="font-bold bg-blue-900/60 px-1 rounded">C</span>}
+                            {q.optionDImage && <span className="font-bold bg-blue-900/60 px-1 rounded">D</span>}
+                          </div>
+                        )}
+                        {q.explanationImage && (
+                          <div className="mt-1 flex items-center space-x-2">
+                            <img
+                              src={q.explanationImage}
+                              alt="Solution Diagram"
+                              className="max-h-10 max-w-[90px] object-contain rounded border border-purple-800 bg-black/40"
+                            />
+                            <span className="text-[9px] bg-purple-950 text-purple-300 border border-purple-800 px-1.5 py-0.5 rounded font-bold">
+                              Solution Diagram
+                            </span>
+                          </div>
+                        )}
                         {q.explanation ? (
                           <div className="mt-1 text-[11px] text-blue-300 bg-blue-950/40 border border-blue-900/50 p-1.5 rounded flex items-start space-x-1">
                             <Sparkles className="w-3 h-3 text-blue-400 shrink-0 mt-0.5" />
