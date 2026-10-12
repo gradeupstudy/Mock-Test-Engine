@@ -89,35 +89,6 @@ export function sanitizeModernColorsInString(str: string): string {
 }
 
 /**
- * Helper to ensure all <img> tags inside an element are fully loaded and decoded
- * before capturing with html2canvas or triggering print dialogs.
- */
-export async function waitForAllImagesToLoad(rootElement: HTMLElement, timeoutMs: number = 3000): Promise<void> {
-  const images = Array.from(rootElement.querySelectorAll('img'));
-  if (images.length === 0) return;
-
-  await Promise.all(
-    images.map((img) => {
-      if (img.complete && img.naturalWidth > 0) return Promise.resolve(true);
-      return new Promise<void>((resolve) => {
-        let timer: any = null;
-        const cleanup = () => {
-          if (timer) clearTimeout(timer);
-          img.onload = null;
-          img.onerror = null;
-          resolve();
-        };
-        img.onload = cleanup;
-        img.onerror = cleanup;
-        timer = setTimeout(cleanup, timeoutMs);
-      });
-    })
-  );
-  // Allow browser layout engine an extra tick to finalize reflow after images settle
-  await new Promise((r) => setTimeout(r, 60));
-}
-
-/**
  * Safe wrapper around html2canvas that sanitizes cloned DOM stylesheets and inline styles
  * to guarantee no oklch / color-mix color parsing crashes.
  */
@@ -125,9 +96,6 @@ export async function safeHtml2Canvas(
   element: HTMLElement,
   options: Parameters<typeof html2canvas>[1] = {}
 ): Promise<HTMLCanvasElement> {
-  // Pre-load and decode all images so they are never blank in the canvas
-  await waitForAllImagesToLoad(element);
-
   const userOnClone = options?.onclone;
 
   const safeOptions = {
@@ -179,7 +147,6 @@ export async function safeHtml2Canvas(
 
   return html2canvas(element, safeOptions);
 }
-
 
 function escapeHtml(str: string): string {
   if (!str) return '';
@@ -552,61 +519,37 @@ export async function exportPdfTestPaper(
       return `${letter}.`;
     };
 
-    const hasAnyOptImg = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
-    const rawA = q.optionA || '';
-    const rawB = q.optionB || '';
-    const rawC = q.optionC || '';
-    const rawD = q.optionD || '';
-    const hasOptNewlines = rawA.includes('\n') || rawB.includes('\n') || rawC.includes('\n') || rawD.includes('\n');
-    const isShortOpts = !hasAnyOptImg && !hasOptNewlines && rawA.length < 32 && rawB.length < 32 && rawC.length < 32 && rawD.length < 32;
+    const optA = `${optLabel('A')} ${escapeHtml(formatMathSymbols(q.optionA || ''))}`;
+    const optB = `${optLabel('B')} ${escapeHtml(formatMathSymbols(q.optionB || ''))}`;
+    const optC = `${optLabel('C')} ${escapeHtml(formatMathSymbols(q.optionC || ''))}`;
+    const optD = `${optLabel('D')} ${escapeHtml(formatMathSymbols(q.optionD || ''))}`;
 
-    const renderOptItem = (label: string, text: string, imgUrl?: string) => `
-      <div style="display: flex; flex-direction: column; gap: 3px;">
-        <div style="white-space: pre-line; word-break: break-word; line-height: 1.4;">
-          <span style="font-weight: 700; color: #1e293b;">${label}</span> ${escapeHtml(formatMathSymbols(text || ''))}
-        </div>
-        ${imgUrl ? `
-          <div style="margin-top: 3px;">
-            <img src="${imgUrl}" alt="${label}" style="max-height: 140px; max-width: 90%; object-fit: contain; border-radius: 4px; border: 1px solid #cbd5e1; display: block;" />
-          </div>
-        ` : ''}
-      </div>
-    `;
-
-    const optAItem = renderOptItem(optLabel('A'), q.optionA, q.optionAImage);
-    const optBItem = renderOptItem(optLabel('B'), q.optionB, q.optionBImage);
-    const optCItem = renderOptItem(optLabel('C'), q.optionC, q.optionCImage);
-    const optDItem = renderOptItem(optLabel('D'), q.optionD, q.optionDImage);
+    const isShortOpts = optA.length < 35 && optB.length < 35 && optC.length < 35 && optD.length < 35;
 
     return `
-      <div style="margin-bottom: 22px; page-break-inside: avoid; break-inside: avoid; position: relative; z-index: 1;">
-        <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 6px; white-space: pre-line; word-break: break-word; line-height: 1.55;">
-          <span style="color: #2563eb; margin-right: 6px; font-weight: 800;">${numPrefix}</span>
+      <div style="margin-bottom: 18px; page-break-inside: avoid; break-inside: avoid; position: relative; z-index: 1;">
+        <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 4px;">
+          <span style="color: #2563eb; margin-right: 4px;">${numPrefix}</span>
           ${escapeHtml(formatMathSymbols(q.question || ''))}
         </div>
-        ${q.questionImage ? `
-          <div style="margin: 8px 0 12px 0; text-align: center; width: 100%;">
-            <img src="${q.questionImage}" alt="Question ${qNum} Diagram" style="max-height: 280px; max-width: 96%; object-fit: contain; border-radius: 6px; border: 1px solid #cbd5e1; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,0.08); background: #ffffff;" />
-          </div>
-        ` : ''}
         ${shouldDisplayTranslation(q.question, q.translation) ? `
-          <div style="font-size: 13.5px; color: #334155; font-style: normal; font-weight: 500; margin-bottom: 8px; padding-left: 18px; white-space: pre-line; word-break: break-word; line-height: 1.55;">
+          <div style="font-size: 14px; color: #334155; font-style: italic; font-weight: 500; margin-bottom: 6px; padding-left: 18px;">
             ${escapeHtml(formatMathSymbols(q.translation!))}
           </div>
         ` : ''}
         ${isShortOpts ? `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; padding-left: 18px; font-size: 13px; color: #1e293b;">
-            <div>${optAItem}</div>
-            <div>${optBItem}</div>
-            <div>${optCItem}</div>
-            <div>${optDItem}</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; padding-left: 18px; font-size: 13px; color: #1e293b;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         ` : `
-          <div style="display: flex; flex-direction: column; gap: 6px; padding-left: 18px; font-size: 13px; color: #1e293b;">
-            <div>${optAItem}</div>
-            <div>${optBItem}</div>
-            <div>${optCItem}</div>
-            <div>${optDItem}</div>
+          <div style="display: flex; flex-direction: column; gap: 4px; padding-left: 18px; font-size: 13px; color: #1e293b;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         `}
       </div>
@@ -784,13 +727,8 @@ export async function exportPdfAnswerKey(
           Option ${q.answer}
           ${correctOptText ? `<div style="font-size: 11px; font-weight: 500; color: #15803d; margin-top: 2px;">"${escapeHtml(correctOptText)}"</div>` : ''}
         </td>
-        <td style="padding: 10px; vertical-align: top; color: #1e293b; line-height: 1.5; white-space: pre-line; word-break: break-word;">
-          <div>${escapeHtml(explanationText)}</div>
-          ${q.explanationImage ? `
-            <div style="margin-top: 8px;">
-              <img src="${q.explanationImage}" alt="Explanation Diagram" style="max-height: 180px; max-width: 95%; object-fit: contain; border-radius: 4px; border: 1px solid #cbd5e1; display: block;" />
-            </div>
-          ` : ''}
+        <td style="padding: 10px; vertical-align: top; color: #1e293b; line-height: 1.5;">
+          ${escapeHtml(explanationText)}
         </td>
       </tr>
     `;
@@ -941,13 +879,8 @@ export function printNativeAnswerKey(
           Option ${q.answer}
           ${correctOptText ? `<div style="font-size: 11px; font-weight: 500; color: #15803d; margin-top: 2px;">"${escapeHtml(correctOptText)}"</div>` : ''}
         </td>
-        <td style="padding: 10px; vertical-align: top; color: #1e293b; line-height: 1.5; white-space: pre-line; word-break: break-word;">
-          <div>${escapeHtml(explanationText)}</div>
-          ${q.explanationImage ? `
-            <div style="margin-top: 8px;">
-              <img src="${q.explanationImage}" alt="Explanation Diagram" style="max-height: 180px; max-width: 95%; object-fit: contain; border-radius: 4px; border: 1px solid #cbd5e1; display: block;" />
-            </div>
-          ` : ''}
+        <td style="padding: 10px; vertical-align: top; color: #1e293b; line-height: 1.5;">
+          ${escapeHtml(explanationText)}
         </td>
       </tr>
     `;
@@ -971,11 +904,6 @@ export function printNativeAnswerKey(
           padding: 0;
           color: #0f172a;
           background: #ffffff;
-        }
-        img {
-          max-width: 100% !important;
-          page-break-inside: avoid;
-          break-inside: avoid;
         }
         table {
           width: 100%;
@@ -1034,16 +962,7 @@ export function printNativeAnswerKey(
       </div>
 
       <script>
-        window.addEventListener('load', () => {
-          const imgs = Array.from(document.querySelectorAll('img'));
-          Promise.all(imgs.map(img => {
-            if (img.complete) return Promise.resolve();
-            return new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 2000); });
-          })).then(() => {
-            setTimeout(() => { window.print(); }, 400);
-          });
-        });
-        setTimeout(() => { window.print(); }, 1200);
+        setTimeout(() => { window.print(); }, 800);
       </script>
     </body>
     </html>
@@ -1086,72 +1005,43 @@ export function printNativeTestPaper(
     let numPrefix = `${qNum}.`;
     if (qStyle.numberingStyle === 'Q1.') numPrefix = `Q.${qNum}`;
     else if (qStyle.numberingStyle === '[1]') numPrefix = `[${qNum}]`;
-    else if (qStyle.numberingStyle === 'Question 1.') numPrefix = `Question ${qNum}.`;
 
     const optLabel = (letter: string) => {
       if (qStyle.optionStyle === '(A)') return `(${letter})`;
-      if (qStyle.optionStyle === '①') {
-        const circles: Record<string, string> = { A: '①', B: '②', C: '③', D: '④' };
-        return circles[letter] || letter;
-      }
       return `${letter}.`;
     };
 
-    const hasAnyOptImg = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
-    const rawA = q.optionA || '';
-    const rawB = q.optionB || '';
-    const rawC = q.optionC || '';
-    const rawD = q.optionD || '';
-    const hasOptNewlines = rawA.includes('\n') || rawB.includes('\n') || rawC.includes('\n') || rawD.includes('\n');
-    const isShortOpts = !hasAnyOptImg && !hasOptNewlines && rawA.length < 32 && rawB.length < 32 && rawC.length < 32 && rawD.length < 32;
+    const optA = `${optLabel('A')} ${escapeHtml(formatMathSymbols(q.optionA || ''))}`;
+    const optB = `${optLabel('B')} ${escapeHtml(formatMathSymbols(q.optionB || ''))}`;
+    const optC = `${optLabel('C')} ${escapeHtml(formatMathSymbols(q.optionC || ''))}`;
+    const optD = `${optLabel('D')} ${escapeHtml(formatMathSymbols(q.optionD || ''))}`;
 
-    const renderOptItem = (label: string, text: string, imgUrl?: string) => `
-      <div style="display: flex; flex-direction: column; gap: 3px;">
-        <div style="white-space: pre-line; word-break: break-word; line-height: 1.4;">
-          <span style="font-weight: 700; color: #1e293b;">${label}</span> ${escapeHtml(formatMathSymbols(text || ''))}
-        </div>
-        ${imgUrl ? `
-          <div style="margin-top: 3px;">
-            <img src="${imgUrl}" alt="${label}" style="max-height: 140px; max-width: 90%; object-fit: contain; border-radius: 4px; border: 1px solid #cbd5e1; display: block;" />
-          </div>
-        ` : ''}
-      </div>
-    `;
-
-    const optAItem = renderOptItem(optLabel('A'), q.optionA, q.optionAImage);
-    const optBItem = renderOptItem(optLabel('B'), q.optionB, q.optionBImage);
-    const optCItem = renderOptItem(optLabel('C'), q.optionC, q.optionCImage);
-    const optDItem = renderOptItem(optLabel('D'), q.optionD, q.optionDImage);
+    const isShortOpts = optA.length < 35 && optB.length < 35 && optC.length < 35 && optD.length < 35;
 
     return `
-      <div style="margin-bottom: 22px; page-break-inside: avoid; break-inside: avoid;">
-        <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 6px; white-space: pre-line; word-break: break-word; line-height: 1.55;">
-          <span style="color: #2563eb; margin-right: 6px; font-weight: 800;">${numPrefix}</span>
+      <div style="margin-bottom: 16px; page-break-inside: avoid; break-inside: avoid;">
+        <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 4px;">
+          <span style="color: #2563eb; margin-right: 4px;">${numPrefix}</span>
           ${escapeHtml(formatMathSymbols(q.question || ''))}
         </div>
-        ${q.questionImage ? `
-          <div style="margin: 8px 0 12px 0; text-align: center; width: 100%;">
-            <img src="${q.questionImage}" alt="Question ${qNum} Diagram" style="max-height: 280px; max-width: 96%; object-fit: contain; border-radius: 6px; border: 1px solid #cbd5e1; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,0.08); background: #ffffff;" />
-          </div>
-        ` : ''}
         ${shouldDisplayTranslation(q.question, q.translation) ? `
-          <div style="font-size: 13.5px; color: #334155; font-style: normal; font-weight: 500; margin-bottom: 8px; padding-left: 18px; white-space: pre-line; word-break: break-word; line-height: 1.55;">
+          <div style="font-size: 14px; color: #334155; font-style: italic; font-weight: 500; margin-bottom: 6px; padding-left: 18px;">
             ${escapeHtml(formatMathSymbols(q.translation!))}
           </div>
         ` : ''}
         ${isShortOpts ? `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; padding-left: 18px; font-size: 13px; color: #1e293b;">
-            <div>${optAItem}</div>
-            <div>${optBItem}</div>
-            <div>${optCItem}</div>
-            <div>${optDItem}</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; padding-left: 18px; font-size: 13px; color: #1e293b;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         ` : `
-          <div style="display: flex; flex-direction: column; gap: 6px; padding-left: 18px; font-size: 13px; color: #1e293b;">
-            <div>${optAItem}</div>
-            <div>${optBItem}</div>
-            <div>${optCItem}</div>
-            <div>${optDItem}</div>
+          <div style="display: flex; flex-direction: column; gap: 4px; padding-left: 18px; font-size: 13px; color: #1e293b;">
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         `}
       </div>
@@ -1176,11 +1066,6 @@ export function printNativeTestPaper(
           padding: 0;
           color: #0f172a;
           background: #ffffff;
-        }
-        img {
-          max-width: 100% !important;
-          page-break-inside: avoid;
-          break-inside: avoid;
         }
         @media print {
           .no-print { display: none !important; }
@@ -1225,16 +1110,7 @@ export function printNativeTestPaper(
       </div>
 
       <script>
-        window.addEventListener('load', () => {
-          const imgs = Array.from(document.querySelectorAll('img'));
-          Promise.all(imgs.map(img => {
-            if (img.complete) return Promise.resolve();
-            return new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 2000); });
-          })).then(() => {
-            setTimeout(() => { window.print(); }, 400);
-          });
-        });
-        setTimeout(() => { window.print(); }, 1200);
+        setTimeout(() => { window.print(); }, 800);
       </script>
     </body>
     </html>
@@ -2181,48 +2057,21 @@ export function render2ColPaperColumnItems(
     const qNum = item.originalIndex + 1;
     const q = item.question;
     const splitType = item.splitType || 'full';
+    const optA = `(A) ${escapeHtml(formatMathSymbols(q.optionA || ''))}`;
+    const optB = `(B) ${escapeHtml(formatMathSymbols(q.optionB || ''))}`;
+    const optC = `(C) ${escapeHtml(formatMathSymbols(q.optionC || ''))}`;
+    const optD = `(D) ${escapeHtml(formatMathSymbols(q.optionD || ''))}`;
 
-    const hasAnyOptImage = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
-    const rawA = q.optionA || '';
-    const rawB = q.optionB || '';
-    const rawC = q.optionC || '';
-    const rawD = q.optionD || '';
-    const hasOptNewlines = rawA.includes('\n') || rawB.includes('\n') || rawC.includes('\n') || rawD.includes('\n');
-    const isShort = !hasAnyOptImage && !hasOptNewlines && rawA.length < 24 && rawB.length < 24 && rawC.length < 24 && rawD.length < 24;
-
-    const render2ColOptItem = (label: string, text: string, imgUrl?: string) => `
-      <div style="display: flex; flex-direction: column; gap: 1px;">
-        <div style="white-space: pre-line; word-break: break-word; line-height: 1.3;">
-          <span style="font-weight: 700;">(${label})</span> ${escapeHtml(formatMathSymbols(text || ''))}
-        </div>
-        ${imgUrl ? `
-          <div style="margin-top: 2px;">
-            <img src="${imgUrl}" alt="(${label})" style="max-height: 85px; max-width: 95%; object-fit: contain; border-radius: 2px; border: 1px solid #cbd5e1; display: block;" />
-          </div>
-        ` : ''}
-      </div>
-    `;
-
-    const optAElement = render2ColOptItem('A', q.optionA, q.optionAImage);
-    const optBElement = render2ColOptItem('B', q.optionB, q.optionBImage);
-    const optCElement = render2ColOptItem('C', q.optionC, q.optionCImage);
-    const optDElement = render2ColOptItem('D', q.optionD, q.optionDImage);
+    const isShort = optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
     const showQuestionText = splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab';
 
-    const qImageHtml = q.questionImage ? `
-      <div style="margin: 3px 0 5px 0; text-align: center; width: 100%;">
-        <img src="${q.questionImage}" alt="Q${qNum} Diagram" style="max-height: 190px; max-width: 98%; object-fit: contain; margin: 0 auto; display: block; border-radius: 3px; border: 1px solid #cbd5e1; background: #ffffff;" />
-      </div>
-    ` : '';
-
     const qHeaderHtml = showQuestionText ? `
-      <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px; line-height: 1.35; white-space: pre-line; word-break: break-word;">
-        <span style="font-weight: 800;">Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
+      <div style="font-weight: 700; color: #000000; font-size: ${fontPt}; margin-bottom: 2px; line-height: 1.35;">
+        <span>Q${qNum}. </span>${escapeHtml(formatMathSymbols(q.question || ''))}
       </div>
-      ${qImageHtml}
       ${shouldDisplayTranslation(q.question, q.translation) ? `
-        <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3; white-space: pre-line; word-break: break-word;">
+        <div style="color: #1e293b; font-style: normal; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3;">
           ${escapeHtml(formatMathSymbols(q.translation!))}
         </div>
       ` : ''}
@@ -2238,25 +2087,25 @@ export function render2ColPaperColumnItems(
         </div>
         ${isShort ? `
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-            <div>${optAElement}</div>
-            <div>${optBElement}</div>
-            <div>${optCElement}</div>
-            <div>${optDElement}</div>
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         ` : `
           <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-            <div>${optAElement}</div>
-            <div>${optBElement}</div>
-            <div>${optCElement}</div>
-            <div>${optDElement}</div>
+            <div>${optA}</div>
+            <div>${optB}</div>
+            <div>${optC}</div>
+            <div>${optD}</div>
           </div>
         `}
       `;
     } else if (splitType === 'options_ab') {
       optContent = `
         <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optAElement}</div>
-          <div>${optBElement}</div>
+          <div>${optA}</div>
+          <div>${optB}</div>
         </div>
       `;
     } else if (splitType === 'options_cd') {
@@ -2265,24 +2114,24 @@ export function render2ColPaperColumnItems(
           <span>Q${qNum}. (Contd):</span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optCElement}</div>
-          <div>${optDElement}</div>
+          <div>${optC}</div>
+          <div>${optD}</div>
         </div>
       `;
     } else {
       optContent = isShort ? `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optAElement}</div>
-          <div>${optBElement}</div>
-          <div>${optCElement}</div>
-          <div>${optDElement}</div>
+          <div>${optA}</div>
+          <div>${optB}</div>
+          <div>${optC}</div>
+          <div>${optD}</div>
         </div>
       ` : `
         <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optAElement}</div>
-          <div>${optBElement}</div>
-          <div>${optCElement}</div>
-          <div>${optDElement}</div>
+          <div>${optA}</div>
+          <div>${optB}</div>
+          <div>${optC}</div>
+          <div>${optD}</div>
         </div>
       `;
     }
@@ -2947,11 +2796,6 @@ export function printNativeCompact2ColPaper(
           break-inside: avoid;
         }
         @media print {
-          img {
-            max-width: 100% !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
           .no-print { display: none !important; }
           .pages-container {
             padding: 0 !important;
@@ -3003,19 +2847,6 @@ export function printNativeCompact2ColPaper(
       <div class="pages-container">
         ${pagesHtml}
       </div>
-
-      <script>
-        window.addEventListener('load', () => {
-          const imgs = Array.from(document.querySelectorAll('img'));
-          Promise.all(imgs.map(img => {
-            if (img.complete) return Promise.resolve();
-            return new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 2000); });
-          })).then(() => {
-            setTimeout(() => { window.print(); }, 400);
-          });
-        });
-        setTimeout(() => { window.print(); }, 1400);
-      </script>
     </body>
     </html>
   `);

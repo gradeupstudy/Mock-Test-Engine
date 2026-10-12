@@ -68,7 +68,7 @@ function getQuestionCacheKey(
   colWidth: number = COLUMN_WIDTH_PX,
   splitType: string = 'full'
 ): string {
-  return `${q.id || ''}_${q.question || ''}_${q.translation || ''}_${q.optionA || ''}_${q.optionB || ''}_${q.optionC || ''}_${q.optionD || ''}_${q.questionImage ? '1' : '0'}_${q.optionAImage ? '1' : '0'}_${density}_${colWidth}_${splitType}`;
+  return `${q.id || ''}_${q.question || ''}_${q.translation || ''}_${q.optionA || ''}_${q.optionB || ''}_${q.optionC || ''}_${q.optionD || ''}_${density}_${colWidth}_${splitType}`;
 }
 
 /**
@@ -134,9 +134,7 @@ export function buildQuestionMeasurementHtml(
   const rawC = q.optionC || '';
   const rawD = q.optionD || '';
 
-  const hasAnyOptImg = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
   const isShort =
-    !hasAnyOptImg &&
     rawA.length < 22 &&
     rawB.length < 22 &&
     rawC.length < 22 &&
@@ -147,38 +145,21 @@ export function buildQuestionMeasurementHtml(
     !rawD.includes('\n');
 
   let qHeaderHtml = '';
-  if (splitType === 'full' || splitType === 'question_only' || splitType === 'options_ab') {
-    const qImageMeasureHtml = q.questionImage ? `
-      <div style="margin: 3px 0 5px 0; height: 160px; width: 100%; box-sizing: border-box;"></div>
-    ` : '';
-
+  if (splitType === 'full' || splitType === 'question_only') {
     qHeaderHtml = `
-      <div style="font-weight: 700; color: #000000; margin-bottom: 2px; line-height: 1.35; white-space: pre-line; word-break: break-word;">
+      <div style="font-weight: 700; color: #000000; margin-bottom: 2px; line-height: 1.32;">
         <span>Q${qNum}. </span>
         <span>${formatMathSymbols(escapeHtml(q.question || ''))}</span>
       </div>
-      ${qImageMeasureHtml}
       ${
         hasTranslation && q.translation
-          ? `<div style="font-weight: 500; color: #1e293b; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.3; white-space: pre-line; word-break: break-word;">
+          ? `<div style="font-weight: 500; color: #1e293b; margin-bottom: 2px; font-size: ${optFontPt}; line-height: 1.32;">
               ${formatMathSymbols(escapeHtml(q.translation))}
             </div>`
           : ''
       }
     `;
   }
-
-  const renderOptMeasureItem = (optFormatted: string, imgUrl?: string) => `
-    <div style="display: flex; flex-direction: column; gap: 1px;">
-      <div style="white-space: pre-line; word-break: break-word; line-height: 1.3;">${optFormatted}</div>
-      ${imgUrl ? `<div style="margin-top: 2px; height: 75px; width: 100%;"></div>` : ''}
-    </div>
-  `;
-
-  const optAItem = renderOptMeasureItem(optA, q.optionAImage);
-  const optBItem = renderOptMeasureItem(optB, q.optionBImage);
-  const optCItem = renderOptMeasureItem(optC, q.optionCImage);
-  const optDItem = renderOptMeasureItem(optD, q.optionDImage);
 
   let optContent = '';
   if (splitType === 'question_only') {
@@ -191,24 +172,24 @@ export function buildQuestionMeasurementHtml(
       ${
         isShort
           ? `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-              <div>${optAItem}</div>
-              <div>${optBItem}</div>
-              <div>${optCItem}</div>
-              <div>${optDItem}</div>
+              <div>${optA}</div>
+              <div>${optB}</div>
+              <div>${optC}</div>
+              <div>${optD}</div>
             </div>`
           : `<div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-              <div>${optAItem}</div>
-              <div>${optBItem}</div>
-              <div>${optCItem}</div>
-              <div>${optDItem}</div>
+              <div>${optA}</div>
+              <div>${optB}</div>
+              <div>${optC}</div>
+              <div>${optD}</div>
             </div>`
       }
     `;
   } else if (splitType === 'options_ab') {
     optContent = `
       <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-        <div>${optAItem}</div>
-        <div>${optBItem}</div>
+        <div>${optA}</div>
+        <div>${optB}</div>
       </div>
     `;
   } else if (splitType === 'options_cd') {
@@ -217,23 +198,23 @@ export function buildQuestionMeasurementHtml(
         <span>Q${qNum}. (Contd):</span>
       </div>
       <div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-        <div>${optCItem}</div>
-        <div>${optDItem}</div>
+        <div>${optC}</div>
+        <div>${optD}</div>
       </div>
     `;
   } else {
     optContent = isShort
       ? `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optAItem}</div>
-          <div>${optBItem}</div>
-          <div>${optCItem}</div>
-          <div>${optDItem}</div>
+          <div>${optA}</div>
+          <div>${optB}</div>
+          <div>${optC}</div>
+          <div>${optD}</div>
         </div>`
       : `<div style="display: flex; flex-direction: column; gap: 2px; font-size: ${optFontPt}; color: #000000; line-height: 1.3; padding-top: 1px;">
-          <div>${optAItem}</div>
-          <div>${optBItem}</div>
-          <div>${optCItem}</div>
-          <div>${optDItem}</div>
+          <div>${optA}</div>
+          <div>${optB}</div>
+          <div>${optC}</div>
+          <div>${optD}</div>
         </div>`;
   }
 
