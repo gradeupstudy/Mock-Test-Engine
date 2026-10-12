@@ -104,13 +104,19 @@ export function generateInteractiveHtmlMockTest(
     subject: (q.subject || 'General Knowledge').trim(),
     chapter: (q.chapter || 'General').trim(),
     question: formatMathSymbols(q.question || ''),
+    questionImage: q.questionImage || '',
     translation: q.translation ? formatMathSymbols(q.translation) : '',
     optionA: formatMathSymbols(q.optionA || ''),
+    optionAImage: q.optionAImage || '',
     optionB: formatMathSymbols(q.optionB || ''),
+    optionBImage: q.optionBImage || '',
     optionC: formatMathSymbols(q.optionC || ''),
+    optionCImage: q.optionCImage || '',
     optionD: formatMathSymbols(q.optionD || ''),
+    optionDImage: q.optionDImage || '',
     answer: q.answer || 'A',
     explanation: q.explanation ? formatMathSymbols(q.explanation) : '',
+    explanationImage: q.explanationImage || '',
     difficulty: q.difficulty || 'Moderate'
   }));
 
@@ -1700,8 +1706,11 @@ export function generateInteractiveHtmlMockTest(
         </div>
 
         <div class="question-body">
-          <div id="display-q-text">Loading question text...</div>
-          <div id="display-q-translation" class="bilingual-translation hidden"></div>
+          <div id="display-q-text" style="white-space: pre-line; word-break: break-word; line-height: 1.6;">Loading question text...</div>
+          <div id="display-q-image-container" class="hidden" style="margin: 12px 0; text-align: center;">
+            <img id="display-q-image" src="" alt="Question Diagram" style="max-height: 280px; max-width: 96%; object-fit: contain; border-radius: 6px; border: 1px solid #cbd5e1; display: inline-block; background: #ffffff;" />
+          </div>
+          <div id="display-q-translation" class="bilingual-translation hidden" style="white-space: pre-line; word-break: break-word; line-height: 1.6;"></div>
         </div>
 
         <!-- Options A, B, C, D -->
@@ -2333,6 +2342,15 @@ export function generateInteractiveHtmlMockTest(
       document.getElementById('display-q-subject').textContent = q.subject || 'General';
       document.getElementById('display-q-text').textContent = q.question;
 
+      const imgContainer = document.getElementById('display-q-image-container');
+      const imgEl = document.getElementById('display-q-image');
+      if (q.questionImage && imgContainer && imgEl) {
+        imgEl.src = q.questionImage;
+        imgContainer.classList.remove('hidden');
+      } else if (imgContainer) {
+        imgContainer.classList.add('hidden');
+      }
+
       const transEl = document.getElementById('display-q-translation');
       if (q.translation && q.translation.trim() && q.translation.trim() !== q.question.trim()) {
         transEl.textContent = q.translation;
@@ -2543,14 +2561,18 @@ export function generateInteractiveHtmlMockTest(
 
         let explanationHtml = '';
         if (q.explanation && q.explanation.trim()) {
+          const expImgHtml = q.explanationImage ? '<div style="margin-top: 8px;"><img src="' + q.explanationImage + '" alt="Solution Diagram" style="max-height: 180px; max-width: 95%; object-fit: contain; border-radius: 4px; border: 1px solid #cbd5e1;" /></div>' : '';
           explanationHtml = '<div class="explanation-box">' +
             '<div class="explanation-title">' +
               '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>' +
               '<span>Detailed Solution / Explanation:</span>' +
             '</div>' +
-            '<div>' + escapeHtml(q.explanation) + '</div>' +
+            '<div style="white-space: pre-line; word-break: break-word; line-height: 1.5;">' + escapeHtml(q.explanation) + '</div>' +
+            expImgHtml +
           '</div>';
         }
+
+        const qImgHtml = q.questionImage ? '<div style="margin: 8px 0 12px 0; text-align: center;"><img src="' + q.questionImage + '" alt="Question Diagram" style="max-height: 260px; max-width: 95%; object-fit: contain; border-radius: 6px; border: 1px solid #cbd5e1; background: #ffffff;" /></div>' : '';
 
         card.innerHTML = 
           '<div class="review-item-header">' +
@@ -2560,9 +2582,10 @@ export function generateInteractiveHtmlMockTest(
             '</div>' +
             badgeHtml +
           '</div>' +
-          '<div style="font-size: 1rem; font-weight: 600; color: #0f172a; margin-bottom: 1rem;">' +
+          '<div style="font-size: 1rem; font-weight: 600; color: #0f172a; margin-bottom: 0.75rem; white-space: pre-line; word-break: break-word; line-height: 1.55;">' +
             escapeHtml(q.question) +
-            (q.translation ? '<div class="bilingual-translation">' + escapeHtml(q.translation) + '</div>' : '') +
+            qImgHtml +
+            (q.translation ? '<div class="bilingual-translation" style="white-space: pre-line; word-break: break-word; margin-top: 6px;">' + escapeHtml(q.translation) + '</div>' : '') +
           '</div>' +
           '<div>' + optionsHtml + '</div>' +
           explanationHtml;

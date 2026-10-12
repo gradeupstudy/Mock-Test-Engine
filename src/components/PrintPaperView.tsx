@@ -2114,30 +2114,31 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
                             const hasAnyOptImage = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
-                            const isShort = !hasAnyOptImage && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+                            const hasOptNewlines = (q.optionA || '').includes('\n') || (q.optionB || '').includes('\n') || (q.optionC || '').includes('\n') || (q.optionD || '').includes('\n');
+                            const isShort = !hasAnyOptImage && !hasOptNewlines && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
                             const optAElement = (
                               <div className="flex flex-col">
-                                <span>{optA}</span>
-                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optA}</span>
+                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optBElement = (
                               <div className="flex flex-col">
-                                <span>{optB}</span>
-                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optB}</span>
+                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optCElement = (
                               <div className="flex flex-col">
-                                <span>{optC}</span>
-                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optC}</span>
+                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optDElement = (
                               <div className="flex flex-col">
-                                <span>{optD}</span>
-                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optD}</span>
+                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
 
@@ -2249,50 +2250,57 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 {/* Question Statement Section */}
                                 {showQuestionText && (
                                   <>
-                                    <div className="font-bold text-black flex items-baseline justify-between gap-1">
-                                      <div>
-                                        <span>Q{qNum}. </span>
-                                        {isLiveEditMode ? (
-                                          <span
-                                            contentEditable
-                                            suppressContentEditableWarning
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
-                                                e.preventDefault();
-                                                handleShiftQuestionBack(pageIdx, 1, itemIdx);
-                                              } else if (e.key === 'Enter' && e.altKey) {
-                                                e.preventDefault();
-                                                handleShiftQuestionForward(pageIdx, 1, itemIdx);
-                                              }
-                                            }}
-                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
-                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
-                                          >
-                                            {formatMathSymbols(q.question)}
+                                    <div className="font-bold text-black w-full">
+                                      <div className="flex items-start justify-between gap-1">
+                                        <div className="whitespace-pre-line leading-relaxed break-words w-full">
+                                          <span className="font-extrabold mr-1">Q{qNum}.</span>
+                                          {isLiveEditMode ? (
+                                            <span
+                                              contentEditable
+                                              suppressContentEditableWarning
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                                  e.preventDefault();
+                                                  handleShiftQuestionBack(pageIdx, 1, itemIdx);
+                                                } else if (e.key === 'Enter' && e.altKey) {
+                                                  e.preventDefault();
+                                                  handleShiftQuestionForward(pageIdx, 1, itemIdx);
+                                                }
+                                              }}
+                                              onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                              className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                            >
+                                              {formatMathSymbols(q.question)}
+                                            </span>
+                                          ) : (
+                                            <span>{formatMathSymbols(q.question)}</span>
+                                          )}
+                                        </div>
+                                        {splitType === 'question_only' && (
+                                          <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
+                                            Q ONLY
                                           </span>
-                                        ) : (
-                                          <span>{formatMathSymbols(q.question)}</span>
+                                        )}
+                                        {splitType === 'options_ab' && (
+                                          <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
+                                            A & B
+                                          </span>
                                         )}
                                       </div>
+
                                       {q.questionImage && (
-                                        <div className="my-1 text-center w-full">
-                                          <img src={q.questionImage} alt="Diagram" className="max-h-36 max-w-full object-contain mx-auto rounded" />
+                                        <div className="my-2 text-center w-full">
+                                          <img
+                                            src={q.questionImage}
+                                            alt={`Q${qNum} Diagram`}
+                                            className="max-h-48 max-w-full object-contain mx-auto rounded border border-slate-200 shadow-xs block"
+                                          />
                                         </div>
-                                      )}
-                                      {splitType === 'question_only' && (
-                                        <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
-                                          Q ONLY
-                                        </span>
-                                      )}
-                                      {splitType === 'options_ab' && (
-                                        <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
-                                          A & B
-                                        </span>
                                       )}
                                     </div>
 
                                     {shouldDisplayTranslation(q.question, q.translation) && (
-                                      <div className="text-slate-800 text-[10px]">
+                                      <div className="text-slate-800 text-[10px] whitespace-pre-line leading-relaxed break-words mt-0.5">
                                         {isLiveEditMode ? (
                                           <span
                                             contentEditable
@@ -2433,30 +2441,31 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                             const optC = `(C) ${formatMathSymbols(q.optionC || '')}`;
                             const optD = `(D) ${formatMathSymbols(q.optionD || '')}`;
                             const hasAnyOptImage = !!(q.optionAImage || q.optionBImage || q.optionCImage || q.optionDImage);
-                            const isShort = !hasAnyOptImage && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
+                            const hasOptNewlines = (q.optionA || '').includes('\n') || (q.optionB || '').includes('\n') || (q.optionC || '').includes('\n') || (q.optionD || '').includes('\n');
+                            const isShort = !hasAnyOptImage && !hasOptNewlines && optA.length < 24 && optB.length < 24 && optC.length < 24 && optD.length < 24;
 
                             const optAElement = (
                               <div className="flex flex-col">
-                                <span>{optA}</span>
-                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optA}</span>
+                                {q.optionAImage && <img src={q.optionAImage} alt="(A)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optBElement = (
                               <div className="flex flex-col">
-                                <span>{optB}</span>
-                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optB}</span>
+                                {q.optionBImage && <img src={q.optionBImage} alt="(B)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optCElement = (
                               <div className="flex flex-col">
-                                <span>{optC}</span>
-                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optC}</span>
+                                {q.optionCImage && <img src={q.optionCImage} alt="(C)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
                             const optDElement = (
                               <div className="flex flex-col">
-                                <span>{optD}</span>
-                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-20 max-w-full object-contain my-0.5 rounded" />}
+                                <span className="whitespace-pre-line break-words leading-tight">{optD}</span>
+                                {q.optionDImage && <img src={q.optionDImage} alt="(D)" className="max-h-24 max-w-full object-contain my-0.5 rounded border border-slate-200" />}
                               </div>
                             );
 
@@ -2567,50 +2576,57 @@ export const PrintPaperView: React.FC<PrintPaperViewProps> = ({
                                 {/* Question Statement Section */}
                                 {showQuestionText && (
                                   <>
-                                    <div className="font-bold text-black flex items-baseline justify-between gap-1">
-                                      <div>
-                                        <span>Q{qNum}. </span>
-                                        {isLiveEditMode ? (
-                                          <span
-                                            contentEditable
-                                            suppressContentEditableWarning
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
-                                                e.preventDefault();
-                                                handleShiftQuestionBack(pageIdx, 2, itemIdx);
-                                              } else if (e.key === 'Enter' && e.altKey) {
-                                                e.preventDefault();
-                                                handleShiftQuestionForward(pageIdx, 2, itemIdx);
-                                              }
-                                            }}
-                                            onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
-                                            className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
-                                          >
-                                            {formatMathSymbols(q.question)}
+                                    <div className="font-bold text-black w-full">
+                                      <div className="flex items-start justify-between gap-1">
+                                        <div className="whitespace-pre-line leading-relaxed break-words w-full">
+                                          <span className="font-extrabold mr-1">Q{qNum}.</span>
+                                          {isLiveEditMode ? (
+                                            <span
+                                              contentEditable
+                                              suppressContentEditableWarning
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Backspace' && (e.altKey || (window.getSelection()?.anchorOffset === 0 && window.getSelection()?.isCollapsed))) {
+                                                  e.preventDefault();
+                                                  handleShiftQuestionBack(pageIdx, 2, itemIdx);
+                                                } else if (e.key === 'Enter' && e.altKey) {
+                                                  e.preventDefault();
+                                                  handleShiftQuestionForward(pageIdx, 2, itemIdx);
+                                                }
+                                              }}
+                                              onBlur={(e) => handleInlineOptionChange(item.originalIndex, 'question', e.currentTarget.textContent || '')}
+                                              className="outline-none hover:bg-amber-100/60 p-0.5 rounded"
+                                            >
+                                              {formatMathSymbols(q.question)}
+                                            </span>
+                                          ) : (
+                                            <span>{formatMathSymbols(q.question)}</span>
+                                          )}
+                                        </div>
+                                        {splitType === 'question_only' && (
+                                          <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
+                                            Q ONLY
                                           </span>
-                                        ) : (
-                                          <span>{formatMathSymbols(q.question)}</span>
+                                        )}
+                                        {splitType === 'options_ab' && (
+                                          <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
+                                            A & B
+                                          </span>
                                         )}
                                       </div>
+
                                       {q.questionImage && (
-                                        <div className="my-1 text-center w-full">
-                                          <img src={q.questionImage} alt="Diagram" className="max-h-36 max-w-full object-contain mx-auto rounded" />
+                                        <div className="my-2 text-center w-full">
+                                          <img
+                                            src={q.questionImage}
+                                            alt={`Q${qNum} Diagram`}
+                                            className="max-h-48 max-w-full object-contain mx-auto rounded border border-slate-200 shadow-xs block"
+                                          />
                                         </div>
-                                      )}
-                                      {splitType === 'question_only' && (
-                                        <span className="shrink-0 text-[8px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-mono font-bold">
-                                          Q ONLY
-                                        </span>
-                                      )}
-                                      {splitType === 'options_ab' && (
-                                        <span className="shrink-0 text-[8px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-mono font-bold">
-                                          A & B
-                                        </span>
                                       )}
                                     </div>
 
                                     {shouldDisplayTranslation(q.question, q.translation) && (
-                                      <div className="text-slate-800 text-[10px]">
+                                      <div className="text-slate-800 text-[10px] whitespace-pre-line leading-relaxed break-words mt-0.5">
                                         {isLiveEditMode ? (
                                           <span
                                             contentEditable
